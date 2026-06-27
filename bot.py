@@ -60,15 +60,22 @@ async def ots(interaction: discord.Interaction, username: str):
         )
         return
 
+    embed = discord.Embed(
+        title=f"OTS de {username}",
+        url=url,
+        color=0x3B4CCA,
+    )
+
     try:
-        await interaction.user.send(f"🔗 OTS de **{username}** : {url}")
+        await interaction.user.send(embed=embed)
         await interaction.response.send_message(
             "✅ Je vous ai envoyé le lien en message privé !",
             ephemeral=True,
         )
     except discord.Forbidden:
         await interaction.response.send_message(
-            f"⚠️ Je n'ai pas pu vous envoyer un DM. OTS de **{username}** : {url}",
+            "⚠️ Je n'ai pas pu vous envoyer un DM. Voici votre lien :",
+            embed=embed,
             ephemeral=True,
         )
 
