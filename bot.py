@@ -14,10 +14,9 @@ Setup :
 """
 
 import os
-import datetime
+import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import tasks
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -44,6 +43,29 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 
+async def fetch_pokepaste(url: str) -> list[str]:
+    import re
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status != 200:
+                    return []
+                html = await resp.text()
+    except Exception:
+        return []
+
+    sets = []
+    for pre in re.findall(r"<pre>(.*?)</pre>", html, re.DOTALL):
+        clean = re.sub(r"<[^>]+>", "", pre)
+        lines = [line.rstrip() for line in clean.split("\n")]
+        while lines and not lines[-1]:
+            lines.pop()
+        if lines:
+            sets.append("\n".join(lines))
+
+    return sets[:6]
+
+
 @tree.command(
     name="ots",
     description="Obtenir l'OTS associé à un nom d'utilisateur",
@@ -60,36 +82,36 @@ async def ots(interaction: discord.Interaction, username: str):
         )
         return
 
+    await interaction.response.defer(ephemeral=True)
+
+    sets = await fetch_pokepaste(url)
+    description = "```\n" + "\n\n".join(sets) + "\n```" if sets else ""
+
     embed = discord.Embed(
         title=f"OTS de {username}",
         url=url,
+        description=description,
         color=0x3B4CCA,
     )
 
     try:
         await interaction.user.send(embed=embed)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "✅ Je vous ai envoyé le lien en message privé !",
             ephemeral=True,
         )
     except discord.Forbidden:
-        await interaction.response.send_message(
-            "⚠️ Je n'ai pas pu vous envoyer un DM. Voici votre lien :",
+        await interaction.followup.send(
+            "⚠️ Je n'ai pas pu vous envoyer un DM. Voici votre OTS :",
             embed=embed,
             ephemeral=True,
         )
-
-
-@tasks.loop(minutes=1)
-async def heartbeat():
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Bot en ligne — {len(client.guilds)} serveur(s)")
 
 
 @client.event
 async def on_ready():
     await tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Bot connecté en tant que {client.user}")
-    heartbeat.start()
 
 
 client.run(TOKEN)
