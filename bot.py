@@ -14,6 +14,7 @@ Setup :
 """
 
 import os
+import re
 import sys
 import aiohttp
 import discord
@@ -61,6 +62,12 @@ def validate_config(discord_token: str | None, guild_id_raw: str | None,
 # GUILD_ID) so a missing/invalid var fails fast at boot, not on first /ots.
 GUILD_ID = validate_config(TOKEN, _GUILD_ID_RAW, SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+# Discord embed *description* character limit (fence + marker counted against it).
+DISCORD_DESC_LIMIT = 4096
+# French truncation marker (user-facing text is always French). Appended
+# inside the fence so it renders as visible text, not after a broken fence.
+TRUNCATION_MARKER = "\n… (équipe tronquée)"
+
 # --- Personnalisez ce dictionnaire ---
 USERNAME_URLS: dict[str, str] = {
     "giovlacouture": "https://pokepast.es/6b0e9bdcbf2c6a73",
@@ -80,8 +87,46 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 
+def normalize_name(raw: str) -> str:
+    """Normalize user input to match the stored, indexed ingame_name.
+
+    Mirrors RFC-001 exactly: the players BEFORE-trigger btrim()s ingame_name
+    and the unique index is on lower(ingame_name). Bot-side lookups must apply
+    the same transform (strip + lower) or the match contract breaks.
+    IMPORTANT: change this and the DB index/trigger together — never one alone.
+    """
+    return raw.strip().lower()
+
+
+def render_team_text(team_text: str) -> str:
+    """Return an embed description: team_text in a fenced code block, hardened
+    so it (a) cannot break out of the fence and (b) never exceeds Discord's
+    4096-char description limit (fence + marker counted). Content is trusted;
+    only rendering is hardened (PRD §11.4).
+    """
+    # 1. Neutralize fence-breaking sequences first, on the raw content: any
+    # run of >=3 literal backticks could close the code block early. Insert a
+    # zero-width space between every backtick in each run so no 3 consecutive
+    # backticks survive, while every visible backtick is preserved.
+    hardened = re.sub(r"`{3,}", lambda m: "​".join(m.group(0)), team_text)
+
+    # 2. Assemble the full fenced block.
+    opening, closing = "```\n", "\n```"
+    full = opening + hardened + closing
+    if len(full) <= DISCORD_DESC_LIMIT:
+        return full
+
+    # 3. Budget-aware truncation: cut the (already-hardened) content so the
+    # final assembled string is exactly DISCORD_DESC_LIMIT chars, never more.
+    # Note: Discord counts the description in UTF-16 code units, while this
+    # counts Python str characters — astral-plane characters (some emoji)
+    # count as 2 UTF-16 units there. Char-count is the pragmatic, documented
+    # choice here (RFC-004 §8); it must never exceed DISCORD_DESC_LIMIT.
+    max_content = DISCORD_DESC_LIMIT - len(opening) - len(closing) - len(TRUNCATION_MARKER)
+    return opening + hardened[:max_content] + TRUNCATION_MARKER + closing
+
+
 async def fetch_pokepaste(url: str) -> list[str]:
-    import re
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:

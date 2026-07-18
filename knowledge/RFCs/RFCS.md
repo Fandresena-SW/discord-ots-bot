@@ -17,7 +17,7 @@ Master index for the RFC set that delivers the Supabase-backed backoffice
 | **001** ✅ | [Supabase Schema, Constraints, Indexes & Trigger](RFC-001-Supabase-Schema.md) | F1, F2, F3, F4, F5, F6 | Medium | Day 1 |
 | **002** ✅ | [Organizer Runbook (Studio Workflows)](RFC-002-Organizer-Runbook.md) | F7, F8, F9, F10 | Low–Med | Day 2 |
 | **003** ✅ | [Configuration & PostgREST Data-Access Seam](RFC-003-Config-And-Data-Access.md) | F19, F23, F17(mech) | Medium | Day 2 |
-| **004** | [Pure Logic: Normalization & Render-Safety](RFC-004-Pure-Logic-Normalization-Render-Safety.md) | F12(logic), F14 | High | Day 3–4 |
+| **004** ✅ | [Pure Logic: Normalization & Render-Safety](RFC-004-Pure-Logic-Normalization-Render-Safety.md) | F12(logic), F14 | High | Day 3–4 |
 | **005** | [`/ots` Command Refactor: Live Read & Fail-Soft](RFC-005-OTS-Command-Refactor.md) | F11, F13, F15, F16, F17(route), F18, F22(code), F24(code) | High | Day 3–4 |
 | **006** | [Reliability, Contingency & Release](RFC-006-Reliability-And-Release.md) | F20, F21, F22(docs), F24(backup), E2E, dry-run, deploy | Medium | Day 5–7 |
 

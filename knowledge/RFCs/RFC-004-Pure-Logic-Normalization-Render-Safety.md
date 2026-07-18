@@ -1,6 +1,6 @@
 # RFC-004 — Pure Logic: Input Normalization & Render-Safety
 
-- **Status:** Ready for implementation
+- **Status:** ✅ Complete (2026-07-18, 1 review round — see [§ Completion record](#completion-record))
 - **Implementation order:** 4 of 6
 - **Complexity:** High (correctness-critical char-accounting + escaping)
 - **Features covered:** F12 (normalization *logic*), F14 (render-safety)
@@ -167,3 +167,44 @@ None. Pure functions + tests.
 Stdlib `unittest` in `test_bot.py`, covering the matrix in §3.3. This is the primary
 automated gate in the repo; it must pass before RFC-005 integrates the functions and
 before deploy (RULES §8/§9).
+
+---
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-18**, via `/rfc 004` orchestration (explore →
+  plan → 1 implementation round → 1 review round, no blocking issues).
+- **Delivered:**
+  - `bot.py` — added `DISCORD_DESC_LIMIT` and `TRUNCATION_MARKER` (French) module
+    constants; added `normalize_name(raw)` (`strip()` + `lower()`, docstring
+    explicitly linking it to RFC-001's `btrim`/`lower(ingame_name)` index —
+    "change one, change both"); added `render_team_text(team_text)` (neutralizes
+    any run of ≥3 backticks via zero-width-space insertion, assembles the fenced
+    block, then truncates on the *hardened* content so the final string never
+    exceeds 4096 chars, appending the French marker only when truncation actually
+    occurs). Promoted the pre-existing local `import re` (from `fetch_pokepaste`)
+    to module scope for reuse. The `if __name__ == "__main__":` guard needed for
+    import-safety was already in place from RFC-003 — no change required.
+  - `test_bot.py` (new, repo root) — stdlib `unittest`, 12 tests covering the full
+    RFC §3.3/§6 matrix (normalize: case-insensitivity, trim, internal-whitespace
+    preservation, empty/whitespace-only, Unicode whitespace; render: ordinary
+    text, single triple-backtick, 4+ and multiple backtick runs, oversized input
+    truncated with marker and `len(result) <= 4096`, exactly-at-limit with no
+    marker, empty input). Sets four dummy env vars via `os.environ.setdefault(...)`
+    before `import bot` so the import stays side-effect-free. All 12 pass via both
+    `python -m unittest test_bot` and `python -m unittest discover`. No new
+    dependency, no new folder (`requirements.txt` untouched).
+- **Verification:** `python -m py_compile bot.py test_bot.py` clean; full test
+  suite green; manual boundary-case check confirming a backtick run straddling the
+  truncation cut still yields no reintroduced triple-backtick and `len(result) <=
+  4096`.
+- **Round 1 reviewer verdict:** `BLOCKING ISSUES: None` — no fix round needed.
+- **Deferred, non-blocking (reviewer "Should" items, not release gates):**
+  - `CLAUDE.md` still described `bot.py` as "~117 lines"; stale after cumulative
+    growth across RFC-001/003/004 (now 279 lines). Closed alongside this
+    completion record — see `CLAUDE.md`'s "Stack & layout" section.
+  - RFC-004's own acceptance-criteria checkboxes in §6 are left unchecked, matching
+    this repo's established convention (see RFC-003): completion is recorded here,
+    not by retroactively ticking boxes.
+- **Does not touch** the `/ots` command handler — these two pure functions are not
+  yet wired into the live read path; that integration is RFC-005's explicit scope.

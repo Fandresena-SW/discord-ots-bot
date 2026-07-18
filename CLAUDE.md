@@ -32,9 +32,14 @@ reference doc there (do not scatter them across the repo root).
 
 - **Python 3**, `discord.py>=2.3.0`, `python-dotenv` (`aiohttp` comes in
   transitively via discord.py).
-- The entire app is one file: **`bot.py`** (~117 lines). No packages/modules.
+- The entire app is one file: **`bot.py`** (~280 lines, grown from the original
+  ~117 as the v2.0 RFCs land). No packages/modules.
+- `schema.sql` (repo root) — the Supabase DDL: `tournaments`/`players` tables,
+  constraints, indexes, trigger, RLS (RFC-001/003).
+- `test_bot.py` (repo root) — stdlib `unittest`, covers the pure logic functions
+  below (RFC-004). Run with `python -m unittest test_bot`.
 - Other files: `requirements.txt`, `Procfile`, `.env.example`, `.gitignore`.
-- No CI (`.github/workflows/` is empty) and no tests.
+- No CI (`.github/workflows/` is empty).
 
 ## Run locally
 
@@ -55,6 +60,12 @@ Loaded from `.env` via `python-dotenv`:
 - `GUILD_ID` — target server ID. The `/ots` command is synced only to this
   guild in `on_ready`, so slash-command changes appear immediately for that
   server (no global-sync propagation delay).
+- `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — added for the v2.0 backoffice
+  (RFC-001/003). **Not yet wired into `/ots`** (that's RFC-005) — currently only
+  used by the not-yet-called `fetch_active_player()` data-access seam. Service
+  key is worker-only, never committed.
+- All four vars above are validated at boot by `validate_config()` (`bot.py`) —
+  missing/invalid config fails fast before `client.run()`, not on first `/ots`.
 
 ## Key mechanics (`bot.py`)
 
@@ -79,26 +90,32 @@ manage teams in **Supabase Studio**; the bot reads live on every `/ots`. The
 **player-facing `/ots` flow stays unchanged** (French UI, DM + ephemeral
 fallback, embed format, fail-soft).
 
-**Backlog (build order, per PRD §9 timeline):**
+**Backlog (build order, per PRD §9 timeline).** Full RFC-level status and
+dependency graph: `knowledge/RFCs/RFCS.md`.
 
-1. **Supabase schema** — `tournaments` (`id`, `name`, `is_active`, `created_at`)
+1. ✅ **Supabase schema** — `tournaments` (`id`, `name`, `is_active`, `created_at`)
    and `players` (`id`, `tournament_id` FK, `ingame_name`, `team_text`,
    `pokepaste_url` nullable, `created_at`). Constraints: `ingame_name` unique
    **case-insensitive per tournament**; **partial unique index on
-   `is_active = true`** to enforce exactly one active tournament.
-2. **Config** — add Supabase project URL + **service key** (worker-only, never
-   committed) to env vars; update `.env.example`.
+   `is_active = true`** to enforce exactly one active tournament. *(RFC-001)*
+2. ✅ **Config** — add Supabase project URL + **service key** (worker-only, never
+   committed) to env vars; update `.env.example`. *(RFC-003, plus the
+   `fetch_active_player()` PostgREST read seam and RFC-004's pure
+   `normalize_name`/`render_team_text` helpers it will use — none of this is
+   wired into `/ots` yet.)*
 3. **`bot.py` refactor** — remove `USERNAME_URLS` and the `fetch_pokepaste()`
    scraper; on each `/ots`, query the active tournament's player live from
    Supabase. Build embed from stored `team_text` (rendered verbatim,
    **trust-as-is** — no validation) with the clickable title URL set to
-   `pokepaste_url` **only if present**.
+   `pokepaste_url` **only if present**. *(RFC-005, not yet started.)*
 4. **Fail-soft + improved copy** — keep graceful French handling for
    not-found / no active tournament / Supabase unreachable; add an improved
    "not found" message noting lookups are scoped to the current tournament.
+   *(RFC-005.)*
 5. **Test & deploy** — E2E in-guild (happy path, not-found, no active
    tournament, Supabase down, DMs-closed, URL vs. no-URL embeds); organizer
    dry-run (20-player setup < 5 min); deploy to the Procfile worker.
+   *(RFC-006.)*
 
 **Decisions locked** (PRD §11): DB partial unique index for single-active;
 service key held only by the worker; improved not-found copy approved;
