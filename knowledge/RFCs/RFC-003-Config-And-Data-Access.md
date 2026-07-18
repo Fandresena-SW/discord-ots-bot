@@ -1,6 +1,6 @@
 # RFC-003 — Configuration & PostgREST Data-Access Seam
 
-- **Status:** Ready for implementation
+- **Status:** ✅ Complete (2026-07-18, 2 review rounds — see [§ Completion record](#completion-record))
 - **Implementation order:** 3 of 6
 - **Complexity:** Medium
 - **Features covered:** F19, F23, F17 (timeout *mechanism*; routing lands in RFC-005)
@@ -174,3 +174,55 @@ None (consumes RFC-001). Adds runtime config + one helper function.
   error.
 - No unit tests here (network + config are integration concerns); the **pure** logic
   that *is* unit-tested lives in RFC-004.
+
+---
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-18**, via `/rfc 003` orchestration (explore →
+  plan → 2 code rounds → 2 review rounds; round 1 raised one blocking issue, round 2
+  returned `BLOCKING ISSUES: None`).
+- **Plan:** `.claude/rfc-plans/RFC-003-plan.md`.
+- **Deliverables shipped:**
+  - `bot.py` — `validate_config()` (fail-fast boot check for `DISCORD_TOKEN`,
+    `GUILD_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, including a `GUILD_ID`
+    int-parse guard), run at module load before the `@tree.command` decorator reads
+    `GUILD_ID`; `_escape_ilike()` to neutralize PostgREST wildcard/injection
+    characters; `fetch_active_player(normalized_name)` (+ two private helpers) doing
+    a two-step raw-PostgREST lookup (active tournament → matching player) with a
+    5s bounded timeout per request, service-key auth headers, explicit `select=`
+    column lists, `limit=1`, and a single broad `try/except` mapping every failure to
+    `("unavailable", None)` — never raises to its caller. `client.run(TOKEN)` moved
+    under `if __name__ == "__main__":` for import safety (needed by RFC-004's tests).
+  - `schema.sql` — enabled row-level security on `tournaments` and `players`
+    (deny-by-default, no policies — only the service key, which bypasses RLS,
+    accesses these tables). Closes the tracked follow-up from RFC-001's review (see
+    `RFCS.md` § Tracked follow-ups, now resolved).
+  - `.env.example` / `requirements.txt` — verified already correct from RFC-001; no
+    changes needed.
+- **Verification:** live-tested against the real RFC-002-seeded Supabase project —
+  all four `fetch_active_player` statuses (`ok`, `not_found`, `no_active`,
+  `unavailable`), wildcard/injection probes (`%`, `_`, `*`), and fail-fast boot
+  validation for each of the four required vars individually plus a non-integer
+  `GUILD_ID`. `python3 -m py_compile bot.py` clean both rounds.
+- **Round 1 → Round 2 fix:** reviewer found RLS was not enabled on `tournaments`/
+  `players` (High severity — Supabase's default anon-role SELECT grant left both
+  tables reachable over PostgREST with just the public anon key, bypassing the bot
+  entirely). Fixed by adding the two `enable row level security` statements to
+  `schema.sql`; re-verified the service-key read path is unaffected since
+  `service_role` bypasses RLS by design.
+- **Deferred, non-blocking (reviewer "Should" items, not release gates):**
+  - F6's `EXPLAIN`-confirmed index usage is not fully satisfied: the `ilike` filter
+    does not use the `lower()` btree functional index (`players_tournament_name_idx`)
+    — only equality predicates do. Correct behavior, seq-scan on the tiny seed table,
+    no user-visible defect at this scale; a truly index-served lookup would need a
+    Postgres RPC, which is out of RFC-003's scope. Tracked here rather than silently
+    reattempted.
+  - Minor missing type hint on `_fetch_player_in_tournament`'s `tournament_id` param
+    (`bot.py`) and a stale module-docstring setup note (doesn't yet mention the two
+    new Supabase env vars) — cosmetic, left for a future small cleanup pass.
+- **Tracked follow-up closed:** RLS enablement (assigned to RFC-003 in `RFCS.md`
+  § Tracked follow-ups) is now done — see `RFCS.md` for the corresponding update.
+- **Does not touch** the `/ots` command handler, `USERNAME_URLS`, or
+  `fetch_pokepaste` — those remain RFC-005's scope, per this RFC's explicit
+  boundary.

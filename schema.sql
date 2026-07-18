@@ -4,12 +4,15 @@
 -- RFC-001: tournaments/players tables, DB-enforced invariants (single active
 -- tournament, trimmed + case-insensitive unique player names per tournament),
 -- read-path indexes, and idempotent seed data.
+-- RFC-003: row level security enabled (deny-by-default; the bot's service
+-- key bypasses RLS, so no policies are needed) — tracked follow-up from
+-- RFC-001 review, see RFCS.md "Tracked follow-ups".
 --
 -- Apply once per environment via the Supabase Studio SQL editor. This script
 -- is fully idempotent: re-running it produces no error and no duplicate rows
 -- or objects.
 --
--- Order: tables -> function -> trigger -> indexes -> seed -> (commented)
+-- Order: tables -> function -> trigger -> indexes -> RLS -> seed -> (commented)
 -- verification block.
 -- ============================================================================
 
@@ -99,7 +102,23 @@ create unique index if not exists players_tournament_name_idx
 
 
 -- ----------------------------------------------------------------------------
--- 5. SEED DATA (F5 — idempotent)
+-- 5. ROW LEVEL SECURITY (RFC-003 tracked follow-up — RFCS.md "Tracked
+--    follow-ups"; PRD §6 / RULES §6)
+-- ----------------------------------------------------------------------------
+-- Supabase grants the `anon`/`authenticated` PostgREST roles default SELECT on
+-- public-schema tables unless RLS is enabled. The bot never uses `anon` — it
+-- authenticates every PostgREST request with the service key (see
+-- `fetch_active_player` in bot.py), which BYPASSES RLS entirely. So enabling
+-- RLS here with NO policies is a pure deny-by-default posture for any other
+-- role: it closes the public anon read hole without affecting the bot's own
+-- service-key access path (still reads live via `tournaments`/`players`).
+-- Idempotent: `enable row level security` is safe to re-run.
+alter table tournaments enable row level security;
+alter table players enable row level security;
+
+
+-- ----------------------------------------------------------------------------
+-- 6. SEED DATA (F5 — idempotent)
 -- ----------------------------------------------------------------------------
 -- One active test tournament + 3 sample players reusing entries from the
 -- v1 USERNAME_URLS dict (bot.py). team_text is NOT NULL, and v1 stored no
@@ -133,7 +152,7 @@ on conflict (tournament_id, lower(ingame_name)) do nothing;
 
 
 -- ============================================================================
--- 6. VERIFICATION BLOCK (commented) — uncomment individual statements in the
+-- 7. VERIFICATION BLOCK (commented) — uncomment individual statements in the
 --    Studio SQL editor to self-check the invariants above. Not part of the
 --    idempotent apply path.
 -- ============================================================================
@@ -183,3 +202,15 @@ on conflict (tournament_id, lower(ingame_name)) do nothing;
 --   and lower(p.ingame_name) = lower('giovlacouture');
 -- -- expected: plan references players_tournament_name_idx
 -- reset enable_seqscan;
+
+-- -- RFC-003: RLS deny-by-default check. Run against PostgREST (not the SQL
+-- -- editor, which runs as a superuser role and is unaffected by RLS) with two
+-- -- different keys on `GET {SUPABASE_URL}/rest/v1/players?select=id&limit=1`:
+-- --   1. Using the anon public key as `apikey`/`Authorization: Bearer <anon>`
+-- --      -> expected: HTTP 200 with an EMPTY array (RLS enabled, no policies
+-- --      grant anon anything -> deny-by-default; PostgREST does not error,
+-- --      it just returns no rows).
+-- --   2. Using SUPABASE_SERVICE_KEY (what bot.py's fetch_active_player sends)
+-- --      -> expected: HTTP 200 with the seeded rows, unchanged from before
+-- --      RLS was enabled -- the service_role key bypasses RLS entirely, so
+-- --      the bot's live read path is unaffected by this migration.
