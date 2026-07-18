@@ -1,6 +1,6 @@
 # RFC-005 — `/ots` Command Refactor: Live Read, Deferral, Embed & Fail-Soft
 
-- **Status:** Ready for implementation
+- **Status:** ✅ Complete (2026-07-18, 2 review rounds — see [§ Completion record](#completion-record))
 - **Implementation order:** 5 of 6
 - **Complexity:** High (core command-path refactor — highest-risk item, F11)
 - **Features covered:** F11, F13, F15, F16, F17 (routing), F18, F22 (code parts), F24 (code cleanup)
@@ -174,3 +174,56 @@ None. Consumes RFC-001 data via RFC-003; uses RFC-004 pure functions.
   valid embeds. (RFC-004 unit tests already cover the pure logic.)
 - The consolidated pass/fail sign-off is the **E2E checklist in RFC-006 (Day 5)** —
   the primary release gate (RULES §8).
+
+---
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-18**, via `/rfc 005` orchestration (explore →
+  plan → 2 implementation rounds → 2 review rounds; round 1 closed one blocking
+  doc-sync issue, round 2 verdict `BLOCKING ISSUES: None`).
+- **Delivered:**
+  - `bot.py` — rewrote the `ots` command handler to the v2.0 contract: unconditional
+    `interaction.response.defer(ephemeral=True)` first, `normalize_name(username)`
+    (RFC-004) feeding `fetch_active_player` (RFC-003, bounded 5s), branching on all
+    four statuses (`no_active`, `unavailable`, `not_found`, `ok`) with an early
+    `return` per fail-soft path so exactly one `followup.send` fires per invocation.
+    Embed built with title `OTS de {username}` (raw spelling, not normalized),
+    description via `render_team_text` (RFC-004), color `0x3B4CCA`, and `embed.url`
+    set conditionally — only when `pokepaste_url` is truthy, never `url=None`.
+    Delivery unchanged from v1 (DM attempt, ephemeral confirmation, narrow
+    `discord.Forbidden` → ephemeral fallback with the embed attached).
+  - Deleted `USERNAME_URLS` and `fetch_pokepaste()` entirely (no dormant v1
+    fallback, no commented-out code); updated the stale setup docstring to point
+    at Supabase Studio / `knowledge/RUNBOOK.md` instead of "Modifier
+    USERNAME_URLS". Kept `import re` (still used by `render_team_text`) and
+    `aiohttp` (still used by `fetch_active_player`) — both confirmed still in use,
+    not dead imports.
+  - `CLAUDE.md` — "Key mechanics" section rewritten to describe the live
+    `fetch_active_player`-driven flow instead of the deleted v1 mechanics; config
+    paragraph updated to state `fetch_active_player()` is now called on every
+    `/ots`; backlog items 2–4 marked ✅ (closed the round-1 blocking issue where
+    the docs still described `USERNAME_URLS`/`fetch_pokepaste` as current and
+    called RFC-005 "not yet started").
+- **Verification:** `python -m unittest test_bot` — 12/12 pass, unchanged (no
+  regression to RFC-004's `normalize_name`/`render_team_text`); `pyflakes bot.py
+  test_bot.py` — zero issues; `py_compile` clean; every branch manually traced
+  against the risk list in §8 (single-response-per-path, optional-URL, narrow
+  exception, empty/whitespace input → `not_found`, title-echo vs.
+  normalized-lookup).
+- **Round 1 reviewer verdict:** one blocking issue — `CLAUDE.md` described the
+  deleted v1 mechanics as current behavior and marked RFC-005 "not yet started"
+  even though `bot.py` had already been refactored. Fixed in round 2 (docs-only
+  diff).
+- **Round 2 reviewer verdict:** `BLOCKING ISSUES: None`.
+- **Deferred, non-blocking (reviewer "Should" items, not release gates):**
+  - RFC-005's own §6 acceptance-criteria checkboxes are left unchecked, matching
+    this repo's established convention (see RFC-004): completion is recorded here,
+    not by retroactively ticking boxes.
+  - Two pre-existing E127 continuation-indent nits in `bot.py` (from RFC-003's
+    function signatures) — cosmetic only, unrelated to this RFC's scope, fix
+    opportunistically if either function is touched again.
+- **Manual in-guild E2E** (happy path with/without URL, not-found, no-active,
+  unavailable/timeout, DMs-closed fallback) is **deferred to RFC-006** per the
+  plan — this RFC introduces no new unit-testable pure logic, and the
+  consolidated E2E sign-off is RFC-006's explicit release gate.

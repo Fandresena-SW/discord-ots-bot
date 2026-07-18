@@ -7,9 +7,11 @@ Setup :
      → Activer "Message Content Intent" et "Server Members Intent"
   2. Inviter le bot avec les scopes : bot + applications.commands
      Permission requise : Send Messages
-  3. Copier .env.example → .env et renseigner DISCORD_TOKEN et GUILD_ID
+  3. Copier .env.example → .env et renseigner DISCORD_TOKEN, GUILD_ID,
+     SUPABASE_URL et SUPABASE_SERVICE_KEY
   4. pip install -r requirements.txt
-  5. Modifier USERNAME_URLS ci-dessous avec vos propres entrées
+  5. Gérer le tournoi actif et les joueurs depuis Supabase Studio
+     (voir knowledge/RUNBOOK.md)
   6. python bot.py
 """
 
@@ -68,20 +70,6 @@ DISCORD_DESC_LIMIT = 4096
 # inside the fence so it renders as visible text, not after a broken fence.
 TRUNCATION_MARKER = "\n… (équipe tronquée)"
 
-# --- Personnalisez ce dictionnaire ---
-USERNAME_URLS: dict[str, str] = {
-    "giovlacouture": "https://pokepast.es/6b0e9bdcbf2c6a73",
-    "zou":           "https://pokepast.es/091b94622a4ef357",
-    "jornojovanna":  "https://pokepast.es/e86a5b005eed0d00",
-    "koloina":       "https://pokepast.es/75f754ff0ccdd506",
-    "kantooo":       "https://pokepast.es/e66188e1925d05e9",
-    "bidoof":        "https://pokepast.es/f935327c7b11cc8a",
-    "handsome":      "https://pokepast.es/799b45fcf33b66a4",
-    "mazino":        "https://pokepast.es/ce0f3bc348b29fa0",
-    "anonymespy":    "https://pokepast.es/20c9539a01265a52",
-}
-# -------------------------------------
-
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
@@ -124,28 +112,6 @@ def render_team_text(team_text: str) -> str:
     # choice here (RFC-004 §8); it must never exceed DISCORD_DESC_LIMIT.
     max_content = DISCORD_DESC_LIMIT - len(opening) - len(closing) - len(TRUNCATION_MARKER)
     return opening + hardened[:max_content] + TRUNCATION_MARKER + closing
-
-
-async def fetch_pokepaste(url: str) -> list[str]:
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                if resp.status != 200:
-                    return []
-                html = await resp.text()
-    except Exception:
-        return []
-
-    sets = []
-    for pre in re.findall(r"<pre>(.*?)</pre>", html, re.DOTALL):
-        clean = re.sub(r"<[^>]+>", "", pre)
-        lines = [line.rstrip() for line in clean.split("\n")]
-        while lines and not lines[-1]:
-            lines.pop()
-        if lines:
-            sets.append("\n".join(lines))
-
-    return sets[:6]
 
 
 def _escape_ilike(value: str) -> str:
@@ -234,26 +200,37 @@ async def _fetch_player_in_tournament(session: aiohttp.ClientSession, tournament
 )
 @app_commands.describe(username="Le nom d'utilisateur dont vous souhaitez obtenir l'OTS")
 async def ots(interaction: discord.Interaction, username: str):
-    url = USERNAME_URLS.get(username.lower())
+    await interaction.response.defer(ephemeral=True)
 
-    if url is None:
-        await interaction.response.send_message(
-            f"❌ Nom d'utilisateur non reconnu : **{username}**.",
+    normalized = normalize_name(username)
+    status, player = await fetch_active_player(normalized)
+
+    if status == "no_active":
+        await interaction.followup.send(
+            "⚠️ Aucun tournoi actif pour le moment. Réessayez plus tard.",
+            ephemeral=True,
+        )
+        return
+    if status == "unavailable":
+        await interaction.followup.send(
+            "⚠️ Service momentanément indisponible. Réessayez dans un instant.",
+            ephemeral=True,
+        )
+        return
+    if status == "not_found":
+        await interaction.followup.send(
+            f"❌ Aucun joueur nommé **{username}** dans le tournoi en cours.",
             ephemeral=True,
         )
         return
 
-    await interaction.response.defer(ephemeral=True)
-
-    sets = await fetch_pokepaste(url)
-    description = "```\n" + "\n\n".join(sets) + "\n```" if sets else ""
-
     embed = discord.Embed(
         title=f"OTS de {username}",
-        url=url,
-        description=description,
+        description=render_team_text(player["team_text"]),
         color=0x3B4CCA,
     )
+    if player["pokepaste_url"]:
+        embed.url = player["pokepaste_url"]
 
     try:
         await interaction.user.send(embed=embed)

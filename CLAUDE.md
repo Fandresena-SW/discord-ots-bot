@@ -61,23 +61,33 @@ Loaded from `.env` via `python-dotenv`:
   guild in `on_ready`, so slash-command changes appear immediately for that
   server (no global-sync propagation delay).
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — added for the v2.0 backoffice
-  (RFC-001/003). **Not yet wired into `/ots`** (that's RFC-005) — currently only
-  used by the not-yet-called `fetch_active_player()` data-access seam. Service
+  (RFC-001/003) and **wired into `/ots` on every invocation** (RFC-005) via
+  `fetch_active_player()` (`bot.py:133`), the live PostgREST read seam. Service
   key is worker-only, never committed.
 - All four vars above are validated at boot by `validate_config()` (`bot.py`) —
   missing/invalid config fails fast before `client.run()`, not on first `/ots`.
 
 ## Key mechanics (`bot.py`)
 
-- `USERNAME_URLS` (`bot.py:28`) maps `username → pokepast.es URL`. **Add or
-  change players by editing this dict.** Lookups are case-insensitive
-  (`username.lower()`).
-- `fetch_pokepaste()` (`bot.py:46`) GETs the paste (5s timeout) and
-  **regex-scrapes** `<pre>...</pre>` blocks — it is not a real HTML parser, so
-  it's sensitive to pokepast.es markup changes. Returns `[]` on any
-  error/non-200 (fails soft; the embed just shows an empty description).
-- Embed (`bot.py:90`): title `OTS de {username}`, clickable `url`, code-block
-  description, color `0x3B4CCA`.
+- `/ots` (`bot.py:202`) **defers** the interaction immediately (ephemeral,
+  before any I/O), then `normalize_name()`s the raw input (strip + lower,
+  `bot.py:78`) to match the DB's trimmed/lower-indexed `ingame_name`.
+- `fetch_active_player()` (`bot.py:133`) does a bounded (5s) live PostgREST
+  read against Supabase: active tournament lookup, then a case-insensitive
+  player lookup scoped to that tournament. It **never raises** — every
+  network/timeout/non-200 error collapses to a single `"unavailable"`
+  sentinel — and returns exactly one status: `"ok"`, `"not_found"`,
+  `"no_active"`, or `"unavailable"`.
+- The command branches on that status into three distinct French fail-soft
+  `followup` replies (no active tournament / service unavailable / player not
+  found in the current tournament) or, on `"ok"`, builds the embed: title
+  `OTS de {username}` (raw input, not normalized), description via
+  `render_team_text()` (fenced, hardened, size-capped, `bot.py:89`), color
+  `0x3B4CCA`, and a clickable `url` set to `pokepaste_url` **only when
+  present** (never `url=None`).
+- Delivery (`bot.py:235`) DMs the embed to the user, falling back to an
+  ephemeral in-channel reply with the same embed on `discord.Forbidden`
+  (DMs closed) — unchanged from v1.
 
 ## Planned direction (v2.0)
 
@@ -101,17 +111,16 @@ dependency graph: `knowledge/RFCs/RFCS.md`.
 2. ✅ **Config** — add Supabase project URL + **service key** (worker-only, never
    committed) to env vars; update `.env.example`. *(RFC-003, plus the
    `fetch_active_player()` PostgREST read seam and RFC-004's pure
-   `normalize_name`/`render_team_text` helpers it will use — none of this is
-   wired into `/ots` yet.)*
-3. **`bot.py` refactor** — remove `USERNAME_URLS` and the `fetch_pokepaste()`
+   `normalize_name`/`render_team_text` helpers — wired into `/ots` by item 3
+   below.)*
+3. ✅ **`bot.py` refactor** — removed `USERNAME_URLS` and the `fetch_pokepaste()`
    scraper; on each `/ots`, query the active tournament's player live from
    Supabase. Build embed from stored `team_text` (rendered verbatim,
    **trust-as-is** — no validation) with the clickable title URL set to
-   `pokepaste_url` **only if present**. *(RFC-005, not yet started.)*
-4. **Fail-soft + improved copy** — keep graceful French handling for
-   not-found / no active tournament / Supabase unreachable; add an improved
-   "not found" message noting lookups are scoped to the current tournament.
-   *(RFC-005.)*
+   `pokepaste_url` **only if present**. *(RFC-005)*
+4. ✅ **Fail-soft + improved copy** — graceful French handling for
+   not-found / no active tournament / Supabase unreachable; the "not found"
+   message notes lookups are scoped to the current tournament. *(RFC-005)*
 5. **Test & deploy** — E2E in-guild (happy path, not-found, no active
    tournament, Supabase down, DMs-closed, URL vs. no-URL embeds); organizer
    dry-run (20-player setup < 5 min); deploy to the Procfile worker.
