@@ -25,6 +25,9 @@ reference doc there (do not scatter them across the repo root).
 - `knowledge/RUNBOOK.md` — organizer runbook for Supabase Studio workflows
   (create/activate a tournament, player CRUD, fast bulk setup; extended by
   RFC-006 with pre-flight and contingency procedures).
+- `knowledge/DEPLOYMENT.md` — how the bot is actually deployed and run in
+  production (Oracle Cloud VM, systemd service, redeploy steps,
+  troubleshooting log).
 - `.claude/RULES.md` — development guardrails / locked-decision rules for v2.0
   (kept in `.claude/`, not `knowledge/`).
 
@@ -49,8 +52,11 @@ cp .env.example .env   # then fill in DISCORD_TOKEN and GUILD_ID
 python bot.py
 ```
 
-Deployment target is a Procfile worker: `worker: python3 bot.py`
-(Heroku/Railway/Render-style background process).
+`Procfile` declares the process type (`worker: python3 bot.py`) for a
+Heroku/Railway/Render-style PaaS, but **production actually runs on a
+self-managed Oracle Cloud VM as a systemd service** — see
+`knowledge/DEPLOYMENT.md` for the full setup, redeploy, and troubleshooting
+steps.
 
 ## Config
 
