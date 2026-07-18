@@ -179,20 +179,28 @@ sudo systemctl status discord-ots-bot
 
 ## 9. Redeploying a code change
 
+`deploy.sh` (repo root) automates this: pulls, reinstalls dependencies into
+the venv, restarts the systemd service, and tails the logs.
+
 ```bash
 ssh -i "/path/to/your-key.key" ubuntu@<public-ip>
 cd discord-ots-bot
-git pull
-sudo systemctl restart discord-ots-bot
-sudo systemctl status discord-ots-bot   # confirm "active (running)"
+./deploy.sh
 ```
 
-If `requirements.txt` changed, reinstall into the venv before restarting:
+It assumes the service is named `discord-ots-bot` (matching §8) and that the
+venv lives at `<repo>/venv` — adjust the `SERVICE_NAME` variable at the top
+of the script if either differs on your instance. Equivalent manual steps,
+if you'd rather run them by hand:
 
 ```bash
+cd discord-ots-bot
+git pull
 source venv/bin/activate
 pip install -r requirements.txt
 deactivate
+sudo systemctl restart discord-ots-bot
+sudo systemctl status discord-ots-bot   # confirm "active (running)"
 ```
 
 ---
