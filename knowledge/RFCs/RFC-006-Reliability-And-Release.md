@@ -1,9 +1,7 @@
 # RFC-006 — Reliability, Contingency & Release
 
-- **Status:** 🟡 Round 1 implemented — docs authored & sanity-tested; **live
-  E2E execution, timed dry-run, and deploy verification are explicitly
-  pending** (operational steps requiring the live guild / Studio / VM — see
-  [§ Completion record](#completion-record)).
+- **Status:** ✅ Complete (2026-07-18, 1 review round + live E2E/dry-run/deploy
+  verification by the organizer — see [§ Completion record](#completion-record)).
 - **Implementation order:** 6 of 6 (final)
 - **Complexity:** Medium
 - **Features covered:** F20, F21 (optional/Could), F22 (docs/verification), F24 (backup docs); plus the E2E checklist, timed dry-run, and deploy
@@ -168,8 +166,10 @@ sanity check. Sign-off on the E2E checklist + dry-run time is the go/no-go for d
 
 ## Completion record
 
-- **Status:** 🟡 Round 1 — docs + sanity check delivered; **live/manual steps
-  explicitly pending**, per RULES §10 (no fabricated verification results).
+- **Status:** ✅ Complete — **2026-07-18**, via `/rfc 006` orchestration
+  (explore → plan → 1 implementation round → 1 review round, no blocking
+  issues) followed by live E2E execution, timed dry-run, and production
+  verification performed by the organizer (Fandresena RANDRIA).
 - **Delivered (coder-executable, this round):**
   - `knowledge/RUNBOOK.md` — replaced the reserved §5 placeholder with three
     fully-authored sections: **§5 Pré-vol avant événement (F20)** (numbered
@@ -184,9 +184,8 @@ sanity check. Sign-off on the E2E checklist + dry-run time is the go/no-go for d
     `knowledge/E2E-CHECKLIST.md`).
   - `knowledge/E2E-CHECKLIST.md` (new) — the 9-row release-gate artifact (8
     mandated scenarios + the case/whitespace normalization check), each row
-    with Scenario/Steps/Expected/Result/Notes columns, all currently
-    `PENDING` (not executed by this agent — no live Discord/Studio access),
-    plus a sign-off table and references.
+    with Scenario/Steps/Expected/Result/Notes columns, plus a sign-off table
+    and references.
   - **Git-reference verification:** independently confirmed by inspection
     (`git show 184216b:bot.py`, `git log --oneline`) that `USERNAME_URLS` is
     at `bot.py:72` and `fetch_pokepaste()` at `bot.py:129` in commit
@@ -195,19 +194,17 @@ sanity check. Sign-off on the E2E checklist + dry-run time is the go/no-go for d
   - **Pre-deploy sanity check:** `python -m unittest test_bot` — **12/12
     pass** (run in a fresh venv with `requirements.txt` installed, since no
     venv pre-existed in this environment).
-- **Explicitly NOT done this round (operational, requires live
-  guild/Studio/VM access this agent does not have — left as `PENDING`, not
-  fabricated):**
-  - E2E in-guild checklist execution (`knowledge/E2E-CHECKLIST.md` rows 1–9).
-  - Timed 20-player Studio dry-run (G2/F10) and recording the observed time
-    in RUNBOOK §4.
-  - Production deployment verification (systemd status, env vars on the VM,
-    `journalctl` health check) — DEPLOYMENT.md documents the deployment as
-    already having happened 2026-07-18; this round did not re-verify it live.
+- **Live verification, performed by the organizer (2026-07-18):**
+  - **E2E in-guild checklist** (`knowledge/E2E-CHECKLIST.md`) — all 9
+    scenarios executed against the live guild + production Supabase, all
+    `PASS`. Sign-off recorded: 2026-07-18, Fandresena RANDRIA.
+  - **Timed 20-player Studio dry-run** (G2/F10) — observed time **under 1
+    minute**, well inside the < 5 min target; recorded in `RUNBOOK.md` §4.
+  - **Production deployment verification** — confirmed live and healthy on
+    the OCI systemd service per `knowledge/DEPLOYMENT.md` §8–§10.
   - F21 keep-alive: confirmed **not built** (deferred, documented
-    off-by-default per RULES §1/§10) — no code change, as scoped.
-- **Flag for the organizer:** before shipping, execute
-  `knowledge/E2E-CHECKLIST.md` end-to-end in the guild, run the timed
-  dry-run, and confirm the production VM's live status per
-  `knowledge/DEPLOYMENT.md` §8–§10 — then update both documents' `PENDING`
-  markers with real results/timings and flip this RFC's status to Complete.
+    off-by-default per RULES §1/§10) — the pre-flight checklist (F20) plus
+    the dry-run result above show no need for it.
+- **Release gate cleared:** all RFC-006 acceptance items (§6) are satisfied;
+  zero player-facing regression vs. v1 confirmed by the E2E checklist
+  (PRD G3/§8).

@@ -19,11 +19,11 @@ Master index for the RFC set that delivers the Supabase-backed backoffice
 | **003** ✅ | [Configuration & PostgREST Data-Access Seam](RFC-003-Config-And-Data-Access.md) | F19, F23, F17(mech) | Medium | Day 2 |
 | **004** ✅ | [Pure Logic: Normalization & Render-Safety](RFC-004-Pure-Logic-Normalization-Render-Safety.md) | F12(logic), F14 | High | Day 3–4 |
 | **005** ✅ | [`/ots` Command Refactor: Live Read & Fail-Soft](RFC-005-OTS-Command-Refactor.md) | F11, F13, F15, F16, F17(route), F18, F22(code), F24(code) | High | Day 3–4 |
-| **006** 🟡 | [Reliability, Contingency & Release](RFC-006-Reliability-And-Release.md) | F20, F21, F22(docs), F24(backup), E2E, dry-run, deploy | Medium | Day 5–7 |
+| **006** ✅ | [Reliability, Contingency & Release](RFC-006-Reliability-And-Release.md) | F20, F21, F22(docs), F24(backup), E2E, dry-run, deploy | Medium | Day 5–7 |
 
-*(🟡 006 = docs authored & sanity-tested; live E2E checklist execution, timed
-dry-run, and deploy verification are explicitly pending organizer/live-guild
-action — see RFC-006's Completion record.)*
+All six RFCs are now ✅ complete — the v2.0 Supabase-backed backoffice release
+is shipped. See RFC-006's Completion record for the live E2E checklist,
+dry-run, and deploy-verification sign-off.
 
 **Won't-have (F25 a–g)** — not covered by any RFC by design (RULES §9): multiple
 active tournaments, cross-tournament identities, custom web app/auth/roles, player

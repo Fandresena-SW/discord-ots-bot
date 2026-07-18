@@ -47,7 +47,7 @@
 
 | Date | Organisateur / exécutant | Résultat global |
 |------|--------------------------|------------------|
-| _à renseigner_ | _à renseigner_ | _PENDING — exécution en attente_ |
+| 2026-07-18 | Fandresena RANDRIA | PASS — les 9 scénarios ont été exécutés en conditions réelles (serveur Discord + Supabase Studio de production) et sont tous passés. |
 
 ---
 

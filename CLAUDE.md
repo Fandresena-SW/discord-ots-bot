@@ -5,14 +5,17 @@ Guidance for working in this repository.
 ## What this is
 
 A single-guild Discord bot that serves Pokémon **OTS** (Open Team Sheet) team
-lists. Users run `/ots <username>`; the bot looks the username up in a hardcoded
-map, fetches that player's team from a pokepast.es link, scrapes the six Pokémon
-sets, and DMs them back as an embed (falling back to an ephemeral in-channel
-reply if the user's DMs are closed). User-facing text is in **French**.
+lists. Users run `/ots <username>`; the bot live-reads that player's row from
+the active tournament in **Supabase** and DMs back an embed of the stored
+`team_text` (falling back to an ephemeral in-channel reply if the user's DMs
+are closed). User-facing text is in **French**.
 
-> The above describes the **current (v1)** behavior. An approved **v2.0**
-> reworks the organizer side — see [Planned direction](#planned-direction-v20)
-> and `knowledge/PRD.md`.
+> This is the **v2.0** behavior, shipped 2026-07-18 (see
+> [Planned direction](#planned-direction-v20), `knowledge/PRD.md`, and
+> `knowledge/RFCs/RFCS.md`). The original v1 (hardcoded `USERNAME_URLS` map +
+> pokepast.es scraper) was replaced by RFC-005 and lives only in git history
+> (see the break-glass procedure in `knowledge/RUNBOOK.md` §6 if it's ever
+> needed again).
 
 ## Docs & knowledge base
 
@@ -131,15 +134,16 @@ dependency graph: `knowledge/RFCs/RFCS.md`.
 4. ✅ **Fail-soft + improved copy** — graceful French handling for
    not-found / no active tournament / Supabase unreachable; the "not found"
    message notes lookups are scoped to the current tournament. *(RFC-005)*
-5. 🟡 **Reliability, contingency & release** — pre-flight (F20), break-glass
+5. ✅ **Reliability, contingency & release** — pre-flight (F20), break-glass
    + graceful-degradation verification (F22), roster backup guidance (F24),
-   and the E2E release-gate checklist are **documented**
-   (`knowledge/RUNBOOK.md` §5–§7, `knowledge/E2E-CHECKLIST.md`); **live
-   execution of the E2E checklist, the timed 20-player dry-run, and
-   production-deploy verification are still pending** (operational steps
-   requiring the live guild/Studio/VM — see RFC-006's Completion record).
-   Deploy target is the OCI systemd service, not the Procfile worker (see
+   and the E2E release-gate checklist are documented (`knowledge/RUNBOOK.md`
+   §5–§7, `knowledge/E2E-CHECKLIST.md`) and **live-verified**: all 9 E2E
+   scenarios pass, the 20-player dry-run ran under 1 minute (target < 5
+   min), and the production deployment is confirmed healthy. Deploy target
+   is the OCI systemd service, not the Procfile worker (see
    `knowledge/DEPLOYMENT.md`). *(RFC-006.)*
+
+**v2.0 is now fully shipped** — all six RFCs (001–006) are complete.
 
 **Decisions locked** (PRD §11): DB partial unique index for single-active;
 service key held only by the worker; improved not-found copy approved;

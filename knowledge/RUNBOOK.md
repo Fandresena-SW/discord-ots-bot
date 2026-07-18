@@ -212,12 +212,12 @@ côté Studio (F5, `schema.sql` §1 — `ingame_name`, `team_text`,
    proprement (ex. l'export Showdown contient des retours à la ligne internes
    qui perturbent un collage multi-colonnes), rester en saisie ligne par
    ligne : ouvrir une ligne à la fois et coller chaque champ séparément.
-4. **Temps observé** : à consigner ici lors du prochain passage réel de cette
-   recette (ex. `20 joueurs — MM:SS — [date] — [organisateur]`).
+4. **Temps observé** : `20 joueurs — < 1 min (moins d'une minute) — 2026-07-18
+   — Fandresena RANDRIA`. Largement sous la cible de 5 minutes (G2).
 
-> ⚠️ La **preuve chronométrée < 5 min** (F10, gate quantitatif de l'objectif
-> G2) est réalisée et actée lors du **dry-run du Jour 6** (RFC-006). Cette
-> section documente la recette ; elle ne remplace pas ce test minuté.
+> ✅ La **preuve chronométrée < 5 min** (F10, gate quantitatif de l'objectif
+> G2) a été réalisée et actée lors du **dry-run du Jour 6** (RFC-006, voir
+> aussi le § Completion record de RFC-006).
 
 ---
 

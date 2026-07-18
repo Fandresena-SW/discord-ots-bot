@@ -5,7 +5,9 @@
 **Author:** Product Management (with Fandresena RANDRIA)
 **Date:** 2026-07-18
 **Target release:** within 1 week (by 2026-07-25)
-**Status:** Draft for build (v2 — hardened after PM review)
+**Status:** ✅ Shipped (2026-07-18) — all six RFCs (001–006) complete; see
+`knowledge/RFCs/RFCS.md` and RFC-006's Completion record for the release
+sign-off.
 
 ---
 
