@@ -1,6 +1,9 @@
 # RFC-006 — Reliability, Contingency & Release
 
-- **Status:** Ready for implementation
+- **Status:** 🟡 Round 1 implemented — docs authored & sanity-tested; **live
+  E2E execution, timed dry-run, and deploy verification are explicitly
+  pending** (operational steps requiring the live guild / Studio / VM — see
+  [§ Completion record](#completion-record)).
 - **Implementation order:** 6 of 6 (final)
 - **Complexity:** Medium
 - **Features covered:** F20, F21 (optional/Could), F22 (docs/verification), F24 (backup docs); plus the E2E checklist, timed dry-run, and deploy
@@ -160,3 +163,51 @@ This RFC **is** the verification stage: manual E2E execution of the full checkli
 the guild, the timed organizer dry-run, contingency rehearsal, and post-deploy
 monitoring. The RFC-004 unit tests (`python -m unittest`) are re-run as a pre-deploy
 sanity check. Sign-off on the E2E checklist + dry-run time is the go/no-go for deploy.
+
+---
+
+## Completion record
+
+- **Status:** 🟡 Round 1 — docs + sanity check delivered; **live/manual steps
+  explicitly pending**, per RULES §10 (no fabricated verification results).
+- **Delivered (coder-executable, this round):**
+  - `knowledge/RUNBOOK.md` — replaced the reserved §5 placeholder with three
+    fully-authored sections: **§5 Pré-vol avant événement (F20)** (numbered
+    checklist including the paused-project → Resume scenario), **§6
+    Contingence / break-glass (F22)** (graceful-degradation verification
+    steps for the organizer, plus the exact-git-reference v1 redeploy
+    procedure), and **§7 Sauvegarde du roster de référence (F24-backup)**
+    (source-notes + Studio CSV export, with explicit refresh timing). Also
+    added an F21 keep-alive deferral note (off-by-default, external-scheduler
+    first) inside §5, and updated the doc header/table of contents and
+    **Références** block (added `knowledge/DEPLOYMENT.md` and
+    `knowledge/E2E-CHECKLIST.md`).
+  - `knowledge/E2E-CHECKLIST.md` (new) — the 9-row release-gate artifact (8
+    mandated scenarios + the case/whitespace normalization check), each row
+    with Scenario/Steps/Expected/Result/Notes columns, all currently
+    `PENDING` (not executed by this agent — no live Discord/Studio access),
+    plus a sign-off table and references.
+  - **Git-reference verification:** independently confirmed by inspection
+    (`git show 184216b:bot.py`, `git log --oneline`) that `USERNAME_URLS` is
+    at `bot.py:72` and `fetch_pokepaste()` at `bot.py:129` in commit
+    `184216b`, and that the v1 path was deleted in `a79bdfb` — matches the
+    plan's cited hashes exactly; no paraphrasing.
+  - **Pre-deploy sanity check:** `python -m unittest test_bot` — **12/12
+    pass** (run in a fresh venv with `requirements.txt` installed, since no
+    venv pre-existed in this environment).
+- **Explicitly NOT done this round (operational, requires live
+  guild/Studio/VM access this agent does not have — left as `PENDING`, not
+  fabricated):**
+  - E2E in-guild checklist execution (`knowledge/E2E-CHECKLIST.md` rows 1–9).
+  - Timed 20-player Studio dry-run (G2/F10) and recording the observed time
+    in RUNBOOK §4.
+  - Production deployment verification (systemd status, env vars on the VM,
+    `journalctl` health check) — DEPLOYMENT.md documents the deployment as
+    already having happened 2026-07-18; this round did not re-verify it live.
+  - F21 keep-alive: confirmed **not built** (deferred, documented
+    off-by-default per RULES §1/§10) — no code change, as scoped.
+- **Flag for the organizer:** before shipping, execute
+  `knowledge/E2E-CHECKLIST.md` end-to-end in the guild, run the timed
+  dry-run, and confirm the production VM's live status per
+  `knowledge/DEPLOYMENT.md` §8–§10 — then update both documents' `PENDING`
+  markers with real results/timings and flip this RFC's status to Complete.

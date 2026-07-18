@@ -24,7 +24,11 @@ reference doc there (do not scatter them across the repo root).
 - `knowledge/FEATURES.md` — feature breakdown (MoSCoW) derived from the PRD.
 - `knowledge/RUNBOOK.md` — organizer runbook for Supabase Studio workflows
   (create/activate a tournament, player CRUD, fast bulk setup; extended by
-  RFC-006 with pre-flight and contingency procedures).
+  RFC-006 with pre-flight, break-glass/contingency, and roster-backup
+  procedures).
+- `knowledge/E2E-CHECKLIST.md` — the RFC-006 release-gate artifact (9
+  scenarios); rows are recorded pass/fail as the checklist is actually
+  executed in the guild.
 - `knowledge/DEPLOYMENT.md` — how the bot is actually deployed and run in
   production (Oracle Cloud VM, systemd service, redeploy steps,
   troubleshooting log).
@@ -127,10 +131,15 @@ dependency graph: `knowledge/RFCs/RFCS.md`.
 4. ✅ **Fail-soft + improved copy** — graceful French handling for
    not-found / no active tournament / Supabase unreachable; the "not found"
    message notes lookups are scoped to the current tournament. *(RFC-005)*
-5. **Test & deploy** — E2E in-guild (happy path, not-found, no active
-   tournament, Supabase down, DMs-closed, URL vs. no-URL embeds); organizer
-   dry-run (20-player setup < 5 min); deploy to the Procfile worker.
-   *(RFC-006.)*
+5. 🟡 **Reliability, contingency & release** — pre-flight (F20), break-glass
+   + graceful-degradation verification (F22), roster backup guidance (F24),
+   and the E2E release-gate checklist are **documented**
+   (`knowledge/RUNBOOK.md` §5–§7, `knowledge/E2E-CHECKLIST.md`); **live
+   execution of the E2E checklist, the timed 20-player dry-run, and
+   production-deploy verification are still pending** (operational steps
+   requiring the live guild/Studio/VM — see RFC-006's Completion record).
+   Deploy target is the OCI systemd service, not the Procfile worker (see
+   `knowledge/DEPLOYMENT.md`). *(RFC-006.)*
 
 **Decisions locked** (PRD §11): DB partial unique index for single-active;
 service key held only by the worker; improved not-found copy approved;

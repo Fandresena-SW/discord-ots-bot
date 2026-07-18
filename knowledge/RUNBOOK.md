@@ -1,11 +1,15 @@
 # Runbook Organisateur — Workflows Supabase Studio
 
-- **Status:** RFC-002 sections (§0–§4) complete; §5 réservé pour RFC-006.
-- **Features couvertes:** F7, F8, F9, F10 (RFC-002); F20, F22, F24-backup à venir (RFC-006).
-- **PRD refs:** §5.2, §7 (Journey A & B), §8 (G2), §9 (Day 2 / Day 6), §11.1.
-- **S'appuie sur:** RFC-001 (`schema.sql` — tables, contrainte, trigger, index).
-- **Complété par:** RFC-006 ajoutera §5 (pré-vol avant événement, contingence /
-  break-glass, sauvegarde du roster de référence) à ce même fichier.
+- **Status:** RFC-002 sections (§0–§4) complete ; §5 (pré-vol), §6
+  (contingence / break-glass) et §7 (sauvegarde du roster) complétés par RFC-006.
+- **Features couvertes:** F7, F8, F9, F10 (RFC-002) ; F20, F22, F24-backup
+  (RFC-006).
+- **PRD refs:** §5.2, §7 (Journey A & B), §8 (G2), §9 (Day 2 / Day 5 / Day 6),
+  §11.1, §12.
+- **S'appuie sur:** RFC-001 (`schema.sql` — tables, contrainte, trigger,
+  index) ; RFC-003/005 (dégradation gracieuse déjà implémentée, vérifiée ici).
+- **Complété par:** RFC-006 a ajouté §5–§7 ci-dessous (dernière section du
+  runbook — release RFC-006 = clôture v2.0).
 
 ---
 
@@ -21,8 +25,9 @@ Il documente, dans l'ordre où on les utilise :
    obtient en cas d'erreur d'une étape n'est **pas un bug**.
 3. **Ajouter / modifier / supprimer** des joueurs sans redéploiement (F9).
 4. La **saisie rapide de ~20 joueurs** (F10).
-5. *(Réservé — ajouté par RFC-006)* Pré-vol avant événement, procédure de
-   secours ("break-glass"), et sauvegarde du roster de référence.
+5. Le **pré-vol avant événement** (F20).
+6. La **contingence / procédure de secours** ("break-glass", F22).
+7. La **sauvegarde du roster de référence** (F24-backup).
 
 Toutes les procédures ci-dessous ont été rédigées à partir du contenu exact de
 `schema.sql` (racine du dépôt) — noms d'objets, comportement du trigger, texte
@@ -216,15 +221,177 @@ côté Studio (F5, `schema.sql` §1 — `ingame_name`, `team_text`,
 
 ---
 
-## §5 — Réservé (ajouté par RFC-006)
+## §5 — Pré-vol avant événement (F20)
 
-Les trois sections suivantes seront ajoutées par RFC-006 dans ce même fichier :
+À dérouler **avant chaque événement**, dans l'ordre, sans exception. Ne pas
+ouvrir l'événement (ne pas annoncer `/ots` disponible aux joueurs) tant que
+les trois items ne sont pas cochés.
 
-- **Pré-vol avant événement (F20)** — *Réservé — ajouté par RFC-006.*
-- **Contingence / procédure de secours ("break-glass") (F22)** — *Réservé —
-  ajouté par RFC-006.*
-- **Sauvegarde du roster de référence (F24-backup)** — *Réservé — ajouté par
-  RFC-006.*
+1. **Le projet Supabase est actif (non mis en pause).**
+   - Ouvrir **Supabase Studio** sur le projet de production.
+   - Le **free tier met en pause un projet après ~7 jours d'inactivité API**
+     (aucune requête PostgREST reçue). Si le projet est pausé, Studio affiche
+     un bandeau/écran d'état indiquant le projet en pause plutôt que le
+     tableau de bord habituel.
+   - **Scénario projet pausé (à traiter, pas à improviser) :** cliquer sur
+     **Resume** (ou **Restore**, selon la version de Studio) et attendre que
+     le projet redémarre complètement (le tableau de bord redevient
+     accessible, les tables réapparaissent dans Table Editor) avant de passer
+     à l'item suivant. Prévoir quelques minutes de marge avant l'heure de
+     l'événement pour ce cas précisément — ne pas faire ce pré-vol à la
+     dernière minute.
+2. **Exactement un tournoi, le bon, a `is_active = true`.**
+   - **Table Editor → tournaments** : vérifier qu'une seule ligne a
+     `is_active = true`, et que c'est bien celle de l'événement du jour (pas
+     un tournoi précédent oublié actif, ni aucun tournoi actif).
+   - Si un changement est nécessaire, **ne pas activer directement** — suivre
+     le **switch en deux temps** (§2 ci-dessus) : désactiver l'ancien, puis
+     activer le nouveau.
+3. **Un `/ots` de test renvoie un joueur connu.**
+   - Dans le serveur Discord, lancer `/ots <joueur du roster réel ou du seed>`
+     (ex. un joueur déjà saisi pour l'événement, ou `koloina` sur
+     l'environnement de test — voir §0 pour le seed).
+   - Confirmer un embed correct : titre `OTS de {username}`, contenu
+     `team_text` lisible dans un bloc de code, lien cliquable si
+     `pokepaste_url` est renseigné.
+4. **Cocher les trois items ci-dessus** avant d'annoncer l'événement ouvert.
+   Si un seul échoue, résoudre (résumer le projet, corriger le tournoi actif,
+   ou investiguer le résultat du test `/ots`) avant de continuer — ne jamais
+   ouvrir un événement sur un pré-vol partiellement passé.
+
+### Note — keep-alive automatique (F21, non construit)
+
+Un ping périodique automatique qui empêcherait le projet Supabase de se
+mettre en pause a été envisagé (F21, priorité *Could*) mais **n'est pas
+construit dans cette release** : le pré-vol ci-dessus (item 1, avec son étape
+Resume) est jugé suffisant comme mitigation. Cette fonctionnalité reste
+**off par défaut**. Si le pré-vol s'avère insuffisant en pratique (ex. pause
+survenant en plein événement malgré un pré-vol récent), la solution à
+privilégier reste un **planificateur externe** (tâche planifiée de la
+plateforme d'hébergement, ou un pinger externe qui interroge une lecture
+PostgREST triviale à une cadence tenant dans la fenêtre ~7 jours) —
+**aucun changement de `bot.py` ni de dépendance** n'est nécessaire pour cette
+approche. Un scheduler in-process nécessiterait une justification explicite
+au regard du PRD avant d'être ajouté (RULES §1/§10) ; ne pas l'ajouter "juste
+au cas où".
+
+---
+
+## §6 — Contingence / procédure de secours ("break-glass") (F22)
+
+### (a) Dégradation gracieuse (déjà implémentée, RFC-003/005) — à vérifier, pas à construire
+
+Le bot **échoue déjà proprement** en cas de panne Supabase (RFC-003/005,
+RULES §7) : sur toute erreur réseau, timeout (~5s) ou statut non-200 côté
+Supabase, l'utilisateur reçoit un message français amical et distinct
+("⚠️ Service momentanément indisponible. Réessayez dans un instant.") — jamais
+un crash ni une trace d'erreur brute. Côté opérateur, chaque échec est loggé
+côté serveur (`print(...)` dans `fetch_active_player` / les helpers internes,
+visible dans les logs du process).
+
+**Ce que l'organisateur doit vérifier pendant l'événement (pas construire) :**
+- Si un joueur signale que `/ots` répond "indisponible", vérifier le log
+  opérateur en direct :
+  ```bash
+  journalctl -u discord-ots-bot -f
+  ```
+  (voir `knowledge/DEPLOYMENT.md` §10 — un message
+  `fetch_active_player: request error: ...` ou
+  `... query failed (status ...)` doit apparaître au moment de l'échec.)
+- Confirmer qu'**aucun crash ni traceback Python** n'a atteint le joueur — le
+  process reste en vie (`systemctl status discord-ots-bot` reste
+  `active (running)`) et seule la réponse Discord change.
+- Si les logs sont silencieux (aucune ligne au moment de l'incident), c'est
+  un signe que le problème n'est **pas** côté Supabase (ex. token Discord
+  invalide, process arrêté) — creuser du côté `systemctl status` /
+  `journalctl` plutôt que côté Supabase.
+
+### (b) Break-glass : redéployer le bot v1 (carte codée en dur) pour un seul événement
+
+**À utiliser uniquement si** Supabase est en panne (pas seulement en pause —
+voir §5 pour la pause, qui se résout par **Resume**, pas par ce break-glass)
+**et** ne peut pas être rétabli à temps avant l'événement.
+
+**Références git exactes (ne pas paraphraser, ne pas re-dériver) :**
+- Le chemin v1 (`USERNAME_URLS` codé en dur + scraper `fetch_pokepaste`) a
+  été **supprimé de l'arborescence de travail dans le commit `a79bdfb`**
+  (RFC-005 : "RFC-005: /ots command refactor to live Supabase read &
+  fail-soft").
+- **Dernier commit où le chemin v1 complet existe encore : `184216b`**
+  (RFC-004 : "RFC-004: Pure logic normalization and render-safety") — à ce
+  commit, `USERNAME_URLS` est défini à `bot.py:72` et `fetch_pokepaste()` à
+  `bot.py:129`.
+
+**Étapes de récupération (documentées ici ; à exécuter uniquement en cas de
+besoin réel, depuis la VM de production) :**
+1. Sur la VM de production, créer une branche jetable pour ne pas perdre le
+   `bot.py` v2 actuel :
+   ```bash
+   cd discord-ots-bot
+   git checkout -b break-glass-temp
+   ```
+2. Restaurer uniquement `bot.py` à sa version v1 (commit `184216b`) :
+   ```bash
+   git checkout 184216b -- bot.py
+   ```
+3. **Éditer `USERNAME_URLS` à la main** (autour de la ligne 72 du fichier
+   restauré) pour y saisir le roster de l'événement, à partir de la
+   **sauvegarde du roster de référence** (§7 ci-dessous) — cette version v1
+   n'a **aucune dépendance Supabase**, elle lit uniquement ce dictionnaire.
+4. Commiter localement sur la branche jetable (pas de push nécessaire) :
+   ```bash
+   git add bot.py
+   git commit -m "break-glass: v1 hardcoded roster for single event"
+   ```
+5. Redémarrer le service — un `deploy.sh` classique ferait un `git pull` qui
+   écraserait ce changement local ; utiliser plutôt un simple redémarrage
+   systemd (le fichier `bot.py` local sur la VM est déjà celui qu'on veut) :
+   ```bash
+   sudo systemctl restart discord-ots-bot
+   sudo systemctl status discord-ots-bot   # confirmer "active (running)"
+   ```
+6. **C'est une mesure temporaire, pour un seul événement.** Une fois Supabase
+   rétabli, revenir immédiatement au chemin v2 :
+   ```bash
+   git checkout main -- bot.py
+   git branch -D break-glass-temp
+   ./deploy.sh
+   ```
+
+⚠️ Ce chemin de secours **exige que le roster ait été ressaisi à la main**
+dans `USERNAME_URLS` — d'où l'importance que la sauvegarde du roster (§7)
+soit **à jour** au moment où ce break-glass est déclenché.
+
+---
+
+## §7 — Sauvegarde du roster de référence (F24-backup)
+
+Le roster (joueurs + `team_text` + `pokepaste_url`) **vit uniquement dans
+Supabase** — il n'existe aucune copie automatique. La sauvegarde de référence
+repose sur deux sources, en pratique complémentaires :
+
+1. **Les notes source de l'organisateur** — la liste dans l'app de notes
+   utilisée pour la saisie rapide (§4 : nom + export Showdown + lien
+   pokepast.es optionnel par joueur). C'est déjà la source qui alimente la
+   saisie Studio ; il suffit de la conserver après la saisie plutôt que de la
+   supprimer.
+2. **Un export CSV depuis Studio** de la table `players` :
+   **Table Editor → players → Export → CSV** (bouton d'export du menu de la
+   table). Cet export capture l'état réel en base, y compris toute
+   correction faite après la saisie initiale (Journey B, §3 « Modifier un
+   joueur »).
+
+**Quand rafraîchir cette sauvegarde :**
+- **Une première fois** juste après avoir finalisé le roster (fin de la
+  saisie rapide, §4).
+- **Une seconde fois, obligatoirement, juste avant chaque événement** — pour
+  capturer toute correction de dernière minute (nom corrigé, équipe mise à
+  jour) faite entre la saisie initiale et le jour J.
+
+Cette sauvegarde est ce qui alimente le dictionnaire `USERNAME_URLS` du
+break-glass (§6b) si celui-ci doit être déclenché — une sauvegarde périmée
+rend le break-glass inutile pour les joueurs ajoutés/modifiés après le
+dernier export.
 
 ---
 
@@ -236,12 +403,17 @@ Les trois sections suivantes seront ajoutées par RFC-006 dans ce même fichier 
   `SUPABASE_SERVICE_KEY`).
 - `knowledge/PRD.md` — §5.2 (Backoffice Studio), §7 (Journey A & B), §8 (G2),
   §11.1 (décision verrouillée : application au niveau base de données).
-- `knowledge/FEATURES.md` — F7, F8, F9, F10 (RFC-002) ; F20, F22, F24
-  (réservés, RFC-006).
+- `knowledge/FEATURES.md` — F7, F8, F9, F10 (RFC-002) ; F20, F22, F24-backup
+  (RFC-006).
 - `.claude/RULES.md` — §2 (docs dans `knowledge/`), §4 (contrainte
   d'activation attendue, jamais "corrigée"), §5 (contrat comportemental),
-  §10 (garder la documentation synchronisée).
+  §7 (fail-soft à l'utilisateur, loud à l'opérateur), §10 (garder la
+  documentation synchronisée).
 - `knowledge/RFCs/RFC-001-Supabase-Schema.md` — schéma, contraintes, index,
   trigger.
 - `knowledge/RFCs/RFC-006-Reliability-And-Release.md` — complète ce runbook
   avec le pré-vol, la contingence, et la sauvegarde du roster.
+- `knowledge/DEPLOYMENT.md` — déploiement VM OCI (systemd, `deploy.sh`,
+  `journalctl`) référencé par §6(a)/(b) ci-dessus.
+- `knowledge/E2E-CHECKLIST.md` — grille de release-gate exécutée avant
+  déploiement (RFC-006, RULES §8).
