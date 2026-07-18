@@ -22,6 +22,9 @@ reference doc there (do not scatter them across the repo root).
 
 - `knowledge/PRD.md` — the approved PRD for the v2.0 Supabase backoffice.
 - `knowledge/FEATURES.md` — feature breakdown (MoSCoW) derived from the PRD.
+- `knowledge/RUNBOOK.md` — organizer runbook for Supabase Studio workflows
+  (create/activate a tournament, player CRUD, fast bulk setup; extended by
+  RFC-006 with pre-flight and contingency procedures).
 - `.claude/RULES.md` — development guardrails / locked-decision rules for v2.0
   (kept in `.claude/`, not `knowledge/`).
 

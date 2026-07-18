@@ -1,6 +1,6 @@
 # RFC-002 — Organizer Runbook (Supabase Studio Workflows)
 
-- **Status:** Ready for implementation
+- **Status:** ✅ Complete (2026-07-18, 2 review rounds — see [§ Completion record](#completion-record))
 - **Implementation order:** 2 of 6
 - **Complexity:** Low–Medium
 - **Features covered:** F7, F8, F9, F10
@@ -141,3 +141,29 @@ None. Consumes RFC-001's schema and Studio configuration.
 Manual execution of every documented procedure against the RFC-001 database,
 recording real outcomes. The timed 20-player dry-run (F10 quantitative gate) is
 performed and signed off in RFC-006 (Day 6).
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-18**, via `/rfc 002` orchestration (explore →
+  plan → 2 code rounds → 2 review rounds; round 1 raised one blocking issue, round 2
+  returned `BLOCKING ISSUES: None`).
+- **Plan:** `.claude/rfc-plans/RFC-002-plan.md`.
+- **Deliverables shipped:**
+  - `knowledge/RUNBOOK.md` (new) — bootstrap (apply `schema.sql`), F7 create/activate,
+    F8 two-step activation switch (exact `23505` constraint error on
+    `tournaments_one_active_idx`, documented as expected), F9 player CRUD (add/edit/
+    delete, trim-trigger note, and the duplicate-`ingame_name` unique-violation on
+    `players_tournament_name_idx`, also documented as expected), F10 20-player
+    fast-setup recipe. Three reserved (not stubbed) placeholders for RFC-006:
+    pre-flight, contingency/break-glass, and roster-backup (F24-backup).
+  - `CLAUDE.md` — docs index updated with a pointer to `knowledge/RUNBOOK.md`.
+- **Verification:** all object names, constraint/trigger behavior, and error text in
+  the runbook were cross-checked verbatim against `schema.sql`. Round 1 review caught
+  the runbook overclaiming these procedures had been "validated by execution" against
+  a live Supabase project when no such interactive run had actually occurred; round 2
+  fixed the wording to honestly separate schema-derived facts (verified) from the
+  interactive Studio click-through and the F10 timed dry-run, which remain **pending
+  a human organizer's execution** (the F10 quantitative proof is explicitly performed
+  and signed off in RFC-006 Day 6, per this RFC's own scope).
+- **No code or schema changes** — `bot.py` and `schema.sql` untouched, consistent with
+  this RFC's documentation-only scope.
