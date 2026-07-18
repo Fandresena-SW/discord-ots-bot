@@ -14,7 +14,7 @@ Master index for the RFC set that delivers the Supabase-backed backoffice
 
 | # | RFC | Features | Complexity | PRD §9 day |
 |---|-----|----------|-----------|-----------|
-| **001** | [Supabase Schema, Constraints, Indexes & Trigger](RFC-001-Supabase-Schema.md) | F1, F2, F3, F4, F5, F6 | Medium | Day 1 |
+| **001** ✅ | [Supabase Schema, Constraints, Indexes & Trigger](RFC-001-Supabase-Schema.md) | F1, F2, F3, F4, F5, F6 | Medium | Day 1 |
 | **002** | [Organizer Runbook (Studio Workflows)](RFC-002-Organizer-Runbook.md) | F7, F8, F9, F10 | Low–Med | Day 2 |
 | **003** | [Configuration & PostgREST Data-Access Seam](RFC-003-Config-And-Data-Access.md) | F19, F23, F17(mech) | Medium | Day 2 |
 | **004** | [Pure Logic: Normalization & Render-Safety](RFC-004-Pure-Logic-Normalization-Render-Safety.md) | F12(logic), F14 | High | Day 3–4 |
@@ -89,6 +89,17 @@ validation, caching, multi-guild, non-French localization.
 - **Locked decisions honored throughout:** DB-level single-active + CI-unique;
   service key worker-only; raw PostgREST over `aiohttp` (no `supabase-py`); team text
   trusted-as-is but render-hardened; improved not-found copy. (PRD §11 / RULES.)
+
+## Tracked follow-ups
+
+- **RLS enablement on `tournaments` / `players` — owner: RFC-003.** RFC-001 creates
+  the tables but deliberately scopes RLS *out* (the worker's service key bypasses RLS
+  anyway). However, Supabase grants the `anon` role default SELECT on public-schema
+  tables unless RLS is enabled, and PRD §6 states tables must not be exposed via a
+  public anon endpoint without RLS. No RFC currently owns closing this gap, so it is
+  assigned to **RFC-003** (the config/data-access seam): enable RLS on both tables
+  with a deny-by-default posture (only the service key needs access) before the
+  RFC-006 deploy. *(Surfaced during RFC-001 review, Round 1.)*
 
 ## Structural decisions (low-risk defaults, flagged in the RFCs)
 

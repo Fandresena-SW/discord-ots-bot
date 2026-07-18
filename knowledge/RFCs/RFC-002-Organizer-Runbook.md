@@ -41,6 +41,29 @@ event; RFC-006 appends the pre-flight and contingency sections to this same file
 
 ### 3.1 Runbook contents
 
+0. **First-time Supabase setup — apply `schema.sql` (one-time bootstrap):**
+   This is the prerequisite for every workflow below; RFC-001 delivers `schema.sql`
+   but this runbook owns *applying* it. Do it once per environment.
+   - Create a Supabase project (supabase.com → **New project**): choose an org, name,
+     region, and DB password (store the password in the organizer's password manager,
+     never in the repo).
+   - Open **Studio → SQL Editor → New query**, paste the entire contents of
+     `schema.sql` (repo root), and **Run**. It is idempotent — safe to re-run; a
+     second run is a no-op (`NOTICE: ... already exists, skipping`).
+   - Confirm objects exist: **Table Editor** shows `tournaments` and `players`; the
+     seed data (1 active tournament + 3 sample players, one with a null
+     `pokepaste_url`) is present. Optionally run the commented verification queries at
+     the bottom of `schema.sql` (F3/F4/F6 self-checks).
+   - Grab the two values that feed the worker's `.env` (`SUPABASE_URL`,
+     `SUPABASE_SERVICE_KEY`) in RFC-003:
+     - **Project Settings → API** → **Project URL**.
+     - **Project Settings → API Keys** → the **secret** key (`sb_secret_…`; on
+       unmigrated projects, the legacy `service_role` JWT). **Not** the publishable
+       key (`sb_publishable_…` / legacy `anon`) — that one respects RLS and would read
+       nothing once RLS is enabled deny-by-default (the RFC-003 follow-up). The secret
+       key bypasses RLS and is worker-only — never commit it or expose it client-side
+       (RULES §3, PRD §11.2).
+
 1. **Create & activate a tournament (F7):**
    - New row in `tournaments`: set `name`; leave `is_active = false` initially.
    - Set `is_active = true` (only when no other tournament is active).
@@ -79,6 +102,7 @@ None. Consumes RFC-001's schema and Studio configuration.
 
 ## 6. Acceptance criteria
 
+- [ ] **Bootstrap:** The runbook documents first-time Supabase project creation and applying `schema.sql` via the Studio SQL Editor; following it produces the two tables, trigger, indexes, and seed data on a fresh project.
 - [ ] **F7:** Following the runbook, a newly created + activated tournament becomes the one the bot reads.
 - [ ] **F8:** The runbook documents the two-step switch; a one-step attempt reproduces the documented constraint error, described as expected behavior with its exact message.
 - [ ] **F9:** Add/edit/delete via Studio each take effect on the next `/ots` with no redeploy; a mid-event `team_text` edit (Journey B) is shown as supported.
@@ -88,9 +112,10 @@ None. Consumes RFC-001's schema and Studio configuration.
 
 ## 7. Implementation details
 
-- **File:** `knowledge/RUNBOOK.md`. Structure: Setup → Activate → Two-step switch →
-  Player CRUD → Fast bulk entry. Leave clearly-marked placeholders that RFC-006 will
-  fill: "Pre-event pre-flight" and "Contingency / break-glass."
+- **File:** `knowledge/RUNBOOK.md`. Structure: First-time Supabase setup (apply
+  `schema.sql`) → Create & activate → Two-step switch → Player CRUD → Fast bulk entry.
+  Leave clearly-marked placeholders that RFC-006 will fill: "Pre-event pre-flight" and
+  "Contingency / break-glass."
 - **Screens/UX spec:** describe Studio table-editor interactions in words (no web UI
   to build). Reference column ordering from RFC-001 F5.
 - **Validation:** actually perform create/activate/switch/CRUD against the RFC-001 DB

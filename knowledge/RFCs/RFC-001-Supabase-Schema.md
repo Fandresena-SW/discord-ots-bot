@@ -1,6 +1,6 @@
 # RFC-001 — Supabase Schema, Constraints, Indexes & Trigger
 
-- **Status:** Ready for implementation
+- **Status:** ✅ Complete (2026-07-18, 1 review round — see [§ Completion record](#completion-record))
 - **Implementation order:** 1 of 6 (foundation — nothing precedes it)
 - **Complexity:** Medium
 - **Features covered:** F1, F2, F3, F4, F5, F6
@@ -209,3 +209,31 @@ Creates `tournaments`, `players`, `trim_ingame_name()`, trigger
 DB-level manual verification in the Studio SQL editor per the acceptance criteria
 (insert conflicting names, attempt second active, run `EXPLAIN`). No Python tests
 in this RFC. Keep the verification SQL in `schema.sql` as commented examples.
+
+---
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-18**, via `/rfc 001` orchestration (explore →
+  plan → 1 code round → 1 review round; reviewer returned `BLOCKING ISSUES: None`).
+- **Plan:** `.claude/rfc-plans/RFC-001-plan.md`.
+- **Deliverables shipped:**
+  - `schema.sql` (new, repo root) — `tournaments` + `players` tables,
+    `trim_ingame_name()` function, `players_trim_ingame_name` trigger,
+    `tournaments_one_active_idx` (single-active partial unique) and
+    `players_tournament_name_idx` (case-insensitive per-tournament uniqueness), seed
+    data (1 active tournament + 3 sample players, one with null `pokepaste_url`), and
+    commented F3/F4/F6 verification queries. Idempotent (safe to re-run).
+  - `.env.example` — added `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` placeholders
+    (secret key `sb_secret_…`, worker-only).
+- **Verification:** coder and reviewer independently applied `schema.sql` twice
+  (idempotency) to a disposable local Postgres container and exercised every
+  acceptance scenario F1–F6 plus FK cascade and the update-path trigger. `bot.py` and
+  the real `.env` untouched.
+- **Post-review polish applied:** F6 verification comment corrected (Seq Scan expected
+  on the tiny seed set; `EXPLAIN` wrapped in `set local enable_seqscan = off`);
+  `.env.example` French accent/arrow fixes and secret-vs-publishable-key clarification.
+- **Tracked follow-up (not RFC-001's scope):** RLS enablement on both tables assigned
+  to **RFC-003** (deny-by-default) — see `RFCS.md` § Tracked follow-ups.
+- **Applying the schema** to a live Supabase project is documented as **step 0 of the
+  RFC-002 runbook** (first-time bootstrap).
