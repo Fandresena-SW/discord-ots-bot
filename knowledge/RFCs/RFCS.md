@@ -42,7 +42,7 @@ depends on all lower-numbered RFCs (v2.0's included).
 | # | RFC | Features | Complexity | Status |
 |---|-----|----------|-----------|--------|
 | **007** ✅ | [Challonge Schema & Cache Tables](RFC-007-Challonge-Schema.md) | F26–F29 | Low–Medium | ✅ Complete |
-| **008** | [Challonge Sync Edge Function (manual trigger)](RFC-008-Challonge-Sync-Edge-Function.md) | F30–F31 | Medium | 📝 Drafted |
+| **008** ✅ | [Challonge Sync Edge Function (manual trigger)](RFC-008-Challonge-Sync-Edge-Function.md) | F30–F31 | Medium | ✅ Complete |
 | **009** | [`/ots` Opponent-Resolution Refactor](RFC-009-OTS-Opponent-Resolution.md) | F32–F34 | High | 📝 Drafted |
 | **010** | [Runbook, Staleness Backstop & Release](RFC-010-Runbook-Staleness-Release.md) | F35–F37 | Medium | 📝 Drafted |
 

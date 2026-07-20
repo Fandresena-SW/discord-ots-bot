@@ -1,0 +1,33 @@
+# Supabase project config (RFC-008). This folder is a documented exception
+# to RULES §2's "no new folders" — scoped to Challonge sync code only, see
+# .claude/RULES.md v3.0 Addendum §12.
+project_id = "discord-ots-bot"
+
+# Non-default local ports: another local Supabase project already occupies
+# the CLI's default 5432x range on this machine, so `supabase start` needs
+# its own block to avoid a port-allocation conflict. Everything else in
+# each section keeps the CLI's built-in default (not restated here).
+[api]
+port = 54421
+
+[db]
+port = 54422
+shadow_port = 54420
+
+[studio]
+port = 54423
+
+[inbucket]
+port = 54424
+
+[analytics]
+port = 54427
+
+[edge_runtime]
+inspector_port = 8183
+
+[functions.challonge-sync]
+# Auth is a custom shared-secret header the function checks itself
+# (x-challonge-sync-secret), not Supabase's default anon/service JWT gate —
+# see RFC-008 §3.2.
+verify_jwt = false

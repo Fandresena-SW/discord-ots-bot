@@ -1,6 +1,6 @@
 # RFC-008 — Challonge Sync Edge Function (Manual Trigger)
 
-- **Status:** 📝 Drafted (not yet implemented)
+- **Status:** ✅ Complete (2026-07-20 — see [§ Completion record](#completion-record))
 - **Implementation order:** 8 of 10 (v3.0) — depends on RFC-007's cache tables;
   depends transitively on all of v2.0 (RFC-001–006)
 - **Complexity:** Medium
@@ -272,3 +272,105 @@ There is no Python test runner for this code — it is Deno/TypeScript.
      writes.
   6. Trigger with an intentionally invalid `CHALLONGE_API_KEY` — confirm 502,
      no writes to either cache table.
+
+---
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-20**, implemented directly (no `/rfc`
+  sub-agent orchestration — same rationale as RFC-007: this repo's
+  `.claude/agents/*.md` and `/rfc` skill are templated for an unrelated
+  Flutter/Supabase project; tracked in `RFCS.md`).
+- **Deliverables shipped:**
+  - `supabase/config.toml` (new) — declares `[functions.challonge-sync]` with
+    `verify_jwt = false`. `supabase/` is the documented RULES §12 exception.
+  - `supabase/functions/challonge-sync/mapping.ts` (new) — pure
+    `mapParticipant`/`mapMatch` functions (Challonge JSON → cache row),
+    factored out of the handler per §10 so they're unit-testable without
+    network access.
+  - `supabase/functions/challonge-sync/index.ts` (new) — the `Deno.serve`
+    handler implementing the full §3.3 sequence (secret check → body parse →
+    tournament/link resolution → both Challonge calls, all-or-nothing → map
+    → upsert → response), with every error path returning the exact
+    `{"status": "error", "message": "..."}` shape and status code §3.2–3.3
+    specifies.
+  - `supabase/functions/challonge-sync/mapping_test.ts` (new) — 4 `Deno.test`
+    cases covering a normal participant/match, a null second-side (bye/unfed
+    slot), and a completed match with a non-null winner.
+  - **No Python touched** — `bot.py`, `schema.sql`, `requirements.txt` are
+    all unaffected, per RFC-008's own scope limitation.
+- **Deliberate deviation from §3.4 (documented, not silent), confirmed correct
+  by live testing:** §3.4 itself flagged its Basic-Auth description as
+  needing verification. I initially researched real Challonge API v1 client
+  libraries and found the ecosystem inconsistent (`pychallonge`/`pychal` use
+  real-username HTTP Basic Auth; `dolejska-daniel/challonge-api` (PHP) uses
+  the `?api_key=...` query parameter; Challonge's own docs list both as
+  valid), and implemented the **query-parameter method** to avoid the
+  username ambiguity entirely. **A subsequent live test against a real
+  Challonge account (below) confirmed this works end-to-end** — no code
+  change was needed. That same live test also surfaced a real wrinkle worth
+  recording: Challonge has since introduced a `v2.1` JSON:API host that
+  accepts legacy `v1` keys via `Authorization`/`Authorization-Type` headers,
+  and a tournament that isn't visible to a given API key's account 404s
+  identically on *both* the legacy `v1` host and the new `v2.1` host — so a
+  "tournament not found" error is genuinely ambiguous between "wrong
+  identifier" and "wrong account," not just a v1-specific quirk. This is
+  called out in `index.ts`'s header comment.
+- **Verification performed:**
+  - `deno test` — all 4 mapping unit tests pass.
+  - `deno check` and `deno lint` on `index.ts` — clean, no errors/warnings.
+  - Local HTTP verification (no Challonge account needed) against a
+    disposable stack: a `postgres:16-alpine` container with `schema.sql`
+    applied, a `postgrest/postgrest` container with
+    `service_role`/`anon`/`authenticator` roles mirroring real Supabase, and
+    a tiny `nginx` reverse proxy adding the `/rest/v1` path prefix Supabase's
+    own gateway adds (bare PostgREST serves at root). Confirmed: 401
+    (missing/wrong secret), 400 (missing/non-numeric `tournament_id`), 404
+    (unknown `tournament_id`), 400 (no Challonge link), and 502 (Challonge
+    API failure) — plus the upsert HTTP contract directly (`Prefer:
+    resolution=merge-duplicates` + `on_conflict=...`: first insert 201,
+    re-upsert 200, no duplicate row). Infrastructure was disposable and
+    removed after the run.
+  - **Full live verification against a real Challonge account**, using
+    `supabase start` (the actual local Supabase stack — Postgres, PostgREST,
+    gateway, on a project-specific port range to avoid colliding with
+    another local Supabase project on the same machine) and `supabase
+    functions serve challonge-sync --env-file .env.local` (see
+    `supabase/functions/challonge-sync/.env.example`). All of RFC-008 §10's
+    manual checklist items 1–6 passed:
+    1. First trigger against a real tournament (linked via
+       `tournaments.challonge_tournament_id`) populated both cache tables
+       correctly — 8 real participants, 4 real matches, exact field values
+       matched Challonge's own API responses.
+    2. Re-trigger with no Challonge-side change — row counts unchanged (no
+       duplicates).
+    3. Reported a real match result on Challonge, re-triggered — that match's
+       row updated **in place** (`open` → `complete`, `winner_challonge_id`
+       set), same `challonge_match_id`, still exactly 4 rows.
+    4. Wrong/missing secret header — 401, no writes.
+    5. Trigger against a tournament with no Challonge link — 400, no writes.
+    6. Trigger with a deliberately invalid `CHALLONGE_API_KEY` against the
+       real `api.challonge.com` — 502, no writes.
+  - **Real bug found during live testing (fixed by test data cleanup, not a
+    code change):** RFC-007's seed data pre-populates
+    `challonge_participants_cache` for the seeded `RFC-001 Test Tournament`
+    row with placeholder names (`giovlacouture`/`zou`/`koloina`) under fake
+    Challonge participant ids (1001–1003). Linking that same tournament row
+    to a real Challonge tournament containing participants with those same
+    names (but real, different Challonge ids) correctly trips the
+    `challonge_participants_cache_name_idx` unique constraint on upsert — the
+    `on_conflict` target is `(tournament_id, challonge_participant_id)`, so
+    Postgres doesn't recognize the seeded and real rows as "the same"
+    participant, and the name-uniqueness constraint (correctly) blocks a
+    second row with the same name. **This is expected, local-dev-only
+    behavior, not a production concern** — a real organizer's active
+    tournament was never seeded in the first place. Fixed by deleting the
+    seed rows from both cache tables for that tournament id before the live
+    trigger. **Flag for RFC-010's runbook:** note this explicitly if the
+    runbook ever suggests reusing the RFC-001/007 seeded tournament for
+    local Challonge-integration testing.
+- **Not yet done (deliberately out of this RFC's scope):** provisioning
+  `CHALLONGE_API_KEY`/`CHALLONGE_SYNC_SECRET` via `supabase secrets set` and
+  `supabase functions deploy challonge-sync` against the real production
+  project — both are RFC-010's runbook/release territory. (This RFC's live
+  test ran entirely against a local Supabase stack, never production.)
