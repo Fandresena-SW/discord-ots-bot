@@ -1,6 +1,6 @@
 # RFC-007 — Challonge Schema & Cache Tables
 
-- **Status:** 📝 Drafted (not yet implemented) — see [§ Documentation gap](#documentation-gap)
+- **Status:** ✅ Complete (2026-07-20 — see [§ Completion record](#completion-record)); the [§ Documentation gap](#documentation-gap) noted below was closed the same day
 - **Implementation order:** 7 of 10 (v3.0) — first RFC of the Challonge
   integration series; depends on **all** of v2.0 (RFC-001–006) being complete
 - **Complexity:** Low–Medium
@@ -17,13 +17,21 @@
 
 ## Documentation gap
 
-Unlike v2.0, there is no formal `knowledge/PRD.md` v3.0 section yet — v3.0's
+**Resolved 2026-07-20 — see `knowledge/PRD.md`'s "v3.0 Addendum — Challonge
+Integration" (§14 onward).** The addendum was added in the same commit that
+drafted this RFC, consolidating v3.0's goals/scope/locked decisions the way
+`PRD.md` §1–13 did for v2.0, and its own "Origin" note names this section
+explicitly as the gap it closes. The paragraph below is kept for historical
+context (it described the gap as it stood while this RFC was being drafted,
+before the addendum landed) — do not treat it as a current TODO.
+
+~~Unlike v2.0, there is no formal `knowledge/PRD.md` v3.0 section yet — v3.0's
 goals and locked decisions currently live only in `knowledge/FEATURES.md`
 §"v3.0 — Challonge Integration" (added alongside this RFC) and the chat history
 that produced them. This is an acknowledged gap, not an oversight: a lightweight
 PRD v3.0 addendum should be written before RFC-010 (release), consolidating the
 goals/scope/decisions the way `PRD.md` did for v2.0. Not blocking for RFC-007,
-since FEATURES.md's addendum fully specifies this RFC's scope.
+since FEATURES.md's addendum fully specifies this RFC's scope.~~
 
 ## 1. Summary
 
@@ -340,3 +348,47 @@ verification SQL as commented examples in `schema.sql`:
            where tournament_id = m.tournament_id and lower(ingame_name) = lower('giovlacouture')
          ));
   ```
+
+---
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-20**, implemented directly (no `/rfc`
+  sub-agent orchestration — this repo's `.claude/agents/{coder,planner,
+  reviewer,explorer}.md` and the `/rfc` skill are templated for a different,
+  unrelated project (a Flutter/Supabase app) and do not apply to this
+  Python/Discord.py bot; flagged to the user, who chose direct implementation).
+- **Deliverables shipped:** `schema.sql` extended per §3–§7 above —
+  `tournaments.challonge_tournament_id` column; `challonge_participants_cache`
+  and `challonge_matches_cache` tables; `challonge_participants_cache_trim_ingame_name`
+  trigger (reusing RFC-001's `trim_ingame_name()`); four new indexes
+  (`challonge_participants_cache_participant_idx`,
+  `challonge_participants_cache_name_idx`, `challonge_matches_cache_match_idx`,
+  `challonge_matches_cache_state_idx`); RLS enabled on both new tables with no
+  policies; the three seed fixtures (open match, pending/no-opponent, absent
+  name). No Python touched.
+- **Verification:** applied `schema.sql` twice to a disposable local
+  `postgres:16-alpine` Docker container to confirm idempotency (second run:
+  zero inserts/updates, no errors), then exercised every F26–F29 acceptance
+  scenario directly: case/whitespace-duplicate participant name rejected
+  (`challonge_participants_cache_name_idx`), an out-of-enum `state` value
+  rejected (`challonge_matches_cache_state_check`), the RFC-009 "current
+  opponent" read pattern against the seed fixtures returned exactly the
+  expected single row (zou, via the open match), `relrowsecurity = t` on all
+  four tables, and deleting the seeded tournament cascaded both new tables'
+  rows to zero. Verification container removed after the run.
+- **Bug found and fixed during verification:** the original §3.3 seed
+  `VALUES` list for `challonge_matches_cache` had `winner_challonge_id = null`
+  in *every* row. With no non-null literal in that column, Postgres can't
+  infer its type from context and defaults it to `text`, which then fails to
+  insert into the `bigint` column (`column "winner_challonge_id" is of type
+  bigint but expression is of type text`). Fixed by casting those two seed
+  literals to `null::bigint`. This is now reflected in both `schema.sql` and
+  §3.3 above.
+- **Not yet done (deliberately out of this RFC's scope):** applying
+  `schema.sql` to the live Supabase project via Studio SQL editor — that's an
+  organizer/operator deployment step (RFC-002/RFC-010's runbook territory),
+  not something this RFC's implementation performs.
+- **Tracked follow-up (not RFC-007's scope):** the `.claude/agents/*.md` +
+  `/rfc` skill mismatch noted above should be fixed or removed before it's
+  relied on for RFC-008/009/010 — see `RFCS.md` § Tracked follow-ups.

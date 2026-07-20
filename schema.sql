@@ -1,5 +1,5 @@
 -- ============================================================================
--- schema.sql — Supabase (Postgres) data layer for discord-ots-bot v2.0
+-- schema.sql — Supabase (Postgres) data layer for discord-ots-bot v2.0/v3.0
 -- ============================================================================
 -- RFC-001: tournaments/players tables, DB-enforced invariants (single active
 -- tournament, trimmed + case-insensitive unique player names per tournament),
@@ -7,6 +7,11 @@
 -- RFC-003: row level security enabled (deny-by-default; the bot's service
 -- key bypasses RLS, so no policies are needed) — tracked follow-up from
 -- RFC-001 review, see RFCS.md "Tracked follow-ups".
+-- RFC-007: Challonge integration data layer — nullable
+-- `tournaments.challonge_tournament_id` link, plus `challonge_participants_cache`
+-- and `challonge_matches_cache` tables (RLS deny-by-default, same as above).
+-- No Python/Edge Function code in this RFC — pure schema, written by and for
+-- RFC-008 (writer) and RFC-009 (reader).
 --
 -- Apply once per environment via the Supabase Studio SQL editor. This script
 -- is fully idempotent: re-running it produces no error and no duplicate rows
@@ -44,6 +49,43 @@ create table if not exists players (
 -- team text (+ optional URL). This is a Studio UI setting only; it is not
 -- (and cannot be) enforced in DDL.
 
+-- RFC-007 (F26): nullable link from a tournament to a Challonge tournament
+-- (id or url slug). NULL means "no Challonge integration for this
+-- tournament" — drives RFC-009's hard-fail path (F34).
+alter table tournaments
+  add column if not exists challonge_tournament_id text null;
+
+-- RFC-007 (F27): locally-readable cache of a Challonge tournament's
+-- participants, keyed by Challonge's own participant id. Reuses the exact
+-- same trim+lower identity contract as players.ingame_name (RFC-001/RULES
+-- §4) via the trim_ingame_name() trigger below. Refreshed by upsert (RFC-008
+-- owns the upsert statement), never plain append.
+create table if not exists challonge_participants_cache (
+  id                       bigint generated always as identity primary key,
+  tournament_id            bigint not null references tournaments(id) on delete cascade,
+  challonge_participant_id bigint not null,
+  ingame_name              text not null,
+  fetched_at               timestamptz not null default now()
+);
+
+-- RFC-007 (F28): locally-readable cache of a Challonge tournament's matches.
+-- `state` mirrors Challonge's own three values verbatim — this is the field
+-- RFC-009's "find my current match" query filters on (state = 'open').
+-- Nullable player*_challonge_id columns represent a bye or a not-yet-fed-in
+-- bracket slot, mirroring how Challonge itself represents them. Refreshed by
+-- upsert (RFC-008 owns the upsert statement), never plain append.
+create table if not exists challonge_matches_cache (
+  id                    bigint generated always as identity primary key,
+  tournament_id         bigint not null references tournaments(id) on delete cascade,
+  challonge_match_id    bigint not null,
+  round                 integer,
+  state                 text not null check (state in ('pending', 'open', 'complete')),
+  player1_challonge_id  bigint null,
+  player2_challonge_id  bigint null,
+  winner_challonge_id   bigint null,
+  fetched_at            timestamptz not null default now()
+);
+
 
 -- ----------------------------------------------------------------------------
 -- 2. FUNCTION — trim + reject empty ingame_name on write
@@ -67,6 +109,14 @@ $$ language plpgsql;
 drop trigger if exists players_trim_ingame_name on players;
 create trigger players_trim_ingame_name
   before insert or update on players
+  for each row execute function trim_ingame_name();
+
+-- RFC-007 (F27): reuses trim_ingame_name() verbatim rather than duplicating
+-- it — it only inspects NEW.ingame_name, which this table also has.
+drop trigger if exists challonge_participants_cache_trim_ingame_name
+  on challonge_participants_cache;
+create trigger challonge_participants_cache_trim_ingame_name
+  before insert or update on challonge_participants_cache
   for each row execute function trim_ingame_name();
 
 
@@ -100,6 +150,26 @@ create unique index if not exists tournaments_one_active_idx
 create unique index if not exists players_tournament_name_idx
   on players (tournament_id, lower(ingame_name));
 
+-- RFC-007 (F27): unique per (tournament, Challonge participant id) — the key
+-- RFC-008's upsert conflicts on — and per (tournament, lower(ingame_name)),
+-- mirroring players_tournament_name_idx's contract above.
+create unique index if not exists challonge_participants_cache_participant_idx
+  on challonge_participants_cache (tournament_id, challonge_participant_id);
+
+create unique index if not exists challonge_participants_cache_name_idx
+  on challonge_participants_cache (tournament_id, lower(ingame_name));
+
+-- RFC-007 (F28): unique per (tournament, Challonge match id) — the key
+-- RFC-008's upsert conflicts on.
+create unique index if not exists challonge_matches_cache_match_idx
+  on challonge_matches_cache (tournament_id, challonge_match_id);
+
+-- RFC-007 (F28): serves RFC-009's "find my current match" read path — filter
+-- to state = 'open' within the tournament, then match a participant id
+-- against either side.
+create index if not exists challonge_matches_cache_state_idx
+  on challonge_matches_cache (tournament_id, state);
+
 
 -- ----------------------------------------------------------------------------
 -- 5. ROW LEVEL SECURITY (RFC-003 tracked follow-up — RFCS.md "Tracked
@@ -115,6 +185,12 @@ create unique index if not exists players_tournament_name_idx
 -- Idempotent: `enable row level security` is safe to re-run.
 alter table tournaments enable row level security;
 alter table players enable row level security;
+
+-- RFC-007 (F29): same deny-by-default posture — the only readers/writers are
+-- the bot (service key, RFC-009) and the Edge Function (also service key,
+-- RFC-008), both of which bypass RLS entirely.
+alter table challonge_participants_cache enable row level security;
+alter table challonge_matches_cache enable row level security;
 
 
 -- ----------------------------------------------------------------------------
@@ -149,6 +225,48 @@ cross join (
 ) as seed(ingame_name, team_text, pokepaste_url)
 where t.name = 'RFC-001 Test Tournament'
 on conflict (tournament_id, lower(ingame_name)) do nothing;
+
+-- RFC-007 (F29): reuses the existing 'RFC-001 Test Tournament' seed row and
+-- its three seeded players so RFC-008/009 have concrete data to build and
+-- test against without a live Challonge account. These placeholder Challonge
+-- ids and the 'rfc007-test-tournament' slug are test-only fixtures, never
+-- real event data.
+update tournaments
+set challonge_tournament_id = 'rfc007-test-tournament'
+where name = 'RFC-001 Test Tournament'
+  and challonge_tournament_id is null;
+
+insert into challonge_participants_cache (tournament_id, challonge_participant_id, ingame_name)
+select t.id, seed.challonge_participant_id, seed.ingame_name
+from tournaments t
+cross join (
+  values
+    (1001, 'giovlacouture'),
+    (1002, 'zou'),
+    (1003, 'koloina')
+) as seed(challonge_participant_id, ingame_name)
+where t.name = 'RFC-001 Test Tournament'
+on conflict (tournament_id, challonge_participant_id) do nothing;
+
+-- Fixtures cover, ahead of time, RFC-009's main scenarios: a resolvable
+-- current opponent (giovlacouture <-> zou, an 'open' match), a "no current
+-- match" case (koloina, fed into the bracket but 'pending' with no
+-- opponent), and — for any name not in this seed set at all — the
+-- "requester not found in cache" case.
+insert into challonge_matches_cache
+  (tournament_id, challonge_match_id, round, state, player1_challonge_id, player2_challonge_id, winner_challonge_id)
+select t.id, seed.challonge_match_id, seed.round, seed.state,
+       seed.player1_challonge_id, seed.player2_challonge_id, seed.winner_challonge_id
+from tournaments t
+cross join (
+  values
+    -- giovlacouture vs zou: an open (current) match — RFC-009 happy-path fixture
+    (5001, 1, 'open',    1001, 1002, null::bigint),
+    -- koloina: fed into the bracket but no opponent yet — RFC-009 bye/no-current-match fixture
+    (5002, 1, 'pending', 1003, null::bigint, null::bigint)
+) as seed(challonge_match_id, round, state, player1_challonge_id, player2_challonge_id, winner_challonge_id)
+where t.name = 'RFC-001 Test Tournament'
+on conflict (tournament_id, challonge_match_id) do nothing;
 
 
 -- ============================================================================
@@ -214,3 +332,49 @@ on conflict (tournament_id, lower(ingame_name)) do nothing;
 -- --      -> expected: HTTP 200 with the seeded rows, unchanged from before
 -- --      RLS was enabled -- the service_role key bypasses RLS entirely, so
 -- --      the bot's live read path is unaffected by this migration.
+
+-- -- RFC-007 F27a: case/whitespace-duplicate Challonge participant name in the
+-- -- same tournament -> rejected, mirroring F4a/F4b above.
+-- insert into challonge_participants_cache (tournament_id, challonge_participant_id, ingame_name)
+-- select id, 9999, '  GiovLaCouture  ' from tournaments
+-- where name = 'RFC-001 Test Tournament';
+-- -- expected: ERROR duplicate key value violates unique constraint
+-- -- "challonge_participants_cache_name_idx"
+
+-- -- RFC-007 F28: unrecognized `state` value -> rejected by the check constraint.
+-- insert into challonge_matches_cache
+--   (tournament_id, challonge_match_id, round, state, player1_challonge_id, player2_challonge_id)
+-- select id, 9999, 1, 'in_progress', 1001, 1002 from tournaments
+-- where name = 'RFC-001 Test Tournament';
+-- -- expected: ERROR new row for relation "challonge_matches_cache" violates
+-- -- check constraint "challonge_matches_cache_state_check"
+
+-- -- RFC-007 F27/F28: deleting the seeded test tournament cascades away both
+-- -- new tables' rows with it (same FK-cascade contract as players).
+-- delete from tournaments where name = 'RFC-001 Test Tournament';
+-- -- expected: succeeds; a follow-up
+-- -- `select count(*) from challonge_participants_cache` /
+-- -- `challonge_matches_cache` for that tournament_id returns 0
+
+-- -- RFC-007: sanity-check the RFC-009 "current opponent" read pattern against
+-- -- the seed fixtures -- expected: one row, the zou side of the open match.
+-- select m.*
+-- from challonge_matches_cache m
+-- join challonge_participants_cache p
+--   on p.tournament_id = m.tournament_id
+--  and p.challonge_participant_id in (m.player1_challonge_id, m.player2_challonge_id)
+-- join tournaments t on t.id = m.tournament_id
+-- where t.name = 'RFC-001 Test Tournament'
+--   and m.state = 'open'
+--   and p.challonge_participant_id != (
+--     select challonge_participant_id from challonge_participants_cache
+--     where tournament_id = m.tournament_id and lower(ingame_name) = lower('giovlacouture')
+--   )
+--   and (m.player1_challonge_id = (
+--          select challonge_participant_id from challonge_participants_cache
+--          where tournament_id = m.tournament_id and lower(ingame_name) = lower('giovlacouture')
+--        )
+--     or m.player2_challonge_id = (
+--          select challonge_participant_id from challonge_participants_cache
+--          where tournament_id = m.tournament_id and lower(ingame_name) = lower('giovlacouture')
+--        ));

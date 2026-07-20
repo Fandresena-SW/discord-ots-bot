@@ -41,7 +41,7 @@ depends on all lower-numbered RFCs (v2.0's included).
 
 | # | RFC | Features | Complexity | Status |
 |---|-----|----------|-----------|--------|
-| **007** | [Challonge Schema & Cache Tables](RFC-007-Challonge-Schema.md) | F26–F29 | Low–Medium | 📝 Drafted |
+| **007** ✅ | [Challonge Schema & Cache Tables](RFC-007-Challonge-Schema.md) | F26–F29 | Low–Medium | ✅ Complete |
 | **008** | [Challonge Sync Edge Function (manual trigger)](RFC-008-Challonge-Sync-Edge-Function.md) | F30–F31 | Medium | 📝 Drafted |
 | **009** | [`/ots` Opponent-Resolution Refactor](RFC-009-OTS-Opponent-Resolution.md) | F32–F34 | High | 📝 Drafted |
 | **010** | [Runbook, Staleness Backstop & Release](RFC-010-Runbook-Staleness-Release.md) | F35–F37 | Medium | 📝 Drafted |
@@ -183,6 +183,18 @@ depends on all lower-numbered RFCs (v2.0's included).
   service key needs access), added during RFC-003's round 2 fix after its own
   reviewer flagged the gap as blocking. *(Surfaced during RFC-001 review, Round 1;
   fixed during RFC-003 review, Round 2 — see RFC-003 § Completion record.)*
+
+- **`.claude/agents/{coder,planner,reviewer,explorer,tester}.md` and the
+  `/rfc` skill are templated for an unrelated Flutter/Supabase project
+  ("Atelier Hub") — owner: unassigned, flagged during RFC-007.** They
+  reference `flutter analyze`, `ccc search`, Dart/`freezed`/Riverpod
+  conventions, `.claude/CLAUDE.md`, `.claude/rules/`, and `knowledge/PRD.v4.md`
+  — none of which exist in this repo. RFC-007 was implemented directly
+  (no orchestration) to avoid the mismatch; RFC-008–010 will hit the same
+  issue unless these agent definitions are rewritten for this repo's actual
+  stack (Python/discord.py/Supabase SQL, `CLAUDE.md`, `.claude/RULES.md`,
+  `knowledge/PRD.md`) or the `/rfc` flow is skipped in favor of direct
+  implementation. *(Surfaced during RFC-007, 2026-07-20 — not yet resolved.)*
 
 ## Structural decisions (low-risk defaults, flagged in the RFCs)
 
