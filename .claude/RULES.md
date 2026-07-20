@@ -181,10 +181,12 @@ Follow the FEATURES.md priorities and the PRD §9 timeline.
   not-found copy (F16), pre-event pre-flight ritual (F20).
 - **Could:** Studio defaults/column ordering (F5), keep-alive ping (F21).
 - **Won't (do not build):** multiple active tournaments, cross-tournament
-  identities, custom web app/auth/roles, self-submission, pairings /
-  hidden-until-reveal, pokepaste scraping, content validation, caching,
-  multi-guild, non-French localization (F25). If asked to build one of these,
-  stop and confirm it's a scope change.
+  identities, custom web app/auth/roles, self-submission, hidden-until-reveal,
+  pokepaste scraping, content validation, caching, multi-guild, non-French
+  localization (F25). If asked to build one of these, stop and confirm it's a
+  scope change. **Real-time pairings (F25e), previously Won't-have, has been
+  picked up by v3.0 / RFC-009** (see §20 below) — it is no longer out of
+  scope.
 
 **Recommended sequence:** schema & indexes/trigger → config + PostgREST helper →
 core refactor (F11) → normalization/embed/render-safety/fail-soft → cleanup

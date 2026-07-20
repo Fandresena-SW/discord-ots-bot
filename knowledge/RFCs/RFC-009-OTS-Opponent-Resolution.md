@@ -1,6 +1,6 @@
 # RFC-009 — `/ots` Opponent-Resolution Refactor
 
-- **Status:** 📝 Drafted (not yet implemented)
+- **Status:** ✅ Complete (2026-07-20 — see [§ Completion record](#completion-record))
 - **Implementation order:** 9 of 10 (v3.0) — depends on RFC-007 (cache table
   shapes) and RFC-008 (populates them); depends transitively on all of v2.0
 - **Complexity:** High (the sole High-complexity v3.0 feature, F32)
@@ -316,3 +316,56 @@ PostgREST/`aiohttp` seam. No `schema.sql` changes.
 - The consolidated pass/fail sign-off is **RFC-010's expanded E2E checklist**
   — the primary release gate for this addendum, mirroring RFC-006's role for
   v2.0.
+
+---
+
+## Completion record
+
+- **Status:** ✅ Complete — **2026-07-20**, implemented directly (no `/rfc`
+  sub-agent orchestration — same rationale as RFC-007/008: this repo's
+  `.claude/agents/*.md` and `/rfc` skill are templated for an unrelated
+  Flutter/Supabase project; tracked in `RFCS.md`).
+- **Deliverables shipped (`bot.py` only, per scope):**
+  - `_fetch_active_tournament_with_link` — sibling to `_fetch_active_tournament_id`
+    with a wider `select` (adds `challonge_tournament_id`); `_fetch_active_tournament_id`
+    itself is untouched.
+  - `_fetch_participant_id`, `_fetch_open_matches`, `_fetch_participant_name` —
+    the three new PostgREST reads against `challonge_participants_cache` /
+    `challonge_matches_cache`, reusing `_escape_ilike` verbatim.
+  - `pick_opponent_id(own_id, matches) -> int | None` — the pure seam from §7,
+    extracted and unit-tested (see below) rather than inlined.
+  - `fetch_current_opponent(normalized_own_name) -> (status, player | None)` —
+    the six-fail-soft-status + success resolution chain (§3.2), reusing
+    `fetch_active_player`/`normalize_name` verbatim for the final step (§3.2
+    step 7), including the `not_found` → `opponent_no_ots`,
+    `no_active` → `unavailable` (mid-request deactivation), and cache-
+    inconsistency → `unavailable` (with a distinct server-side log line)
+    mappings.
+  - `ots` command body rewritten to call `fetch_current_opponent`, branch on
+    all six fail-soft statuses (§3.5 copy verbatim) plus success, and build
+    the embed with `title=f"OTS de {player['ingame_name']}"` (the opponent's
+    stored name, not the caller's raw input) — everything else in the embed
+    (description/color/URL/DM+ephemeral delivery) untouched from v2.0.
+  - Command metadata updated (`description`, `username` arg help text) per
+    §3.4.
+  - `test_bot.py`: `PickOpponentIdTests` (7 cases) added — happy path on
+    either side, multi-match highest-`round` tie-break, null-other-side
+    (bye), self-referential match, and own-id-absent-from-match — all against
+    RFC-007-shaped fixture dicts, no network.
+- **Confirmed unchanged (verified by inspection, not just intent):**
+  `fetch_active_player`, `_fetch_active_tournament_id`,
+  `_fetch_player_in_tournament`, `normalize_name`, `_escape_ilike`,
+  `render_team_text` are byte-for-byte identical to their pre-RFC-009 form.
+- **Accepted inefficiency confirmed as implemented:** the active tournament
+  row is queried twice per invocation (once in
+  `_fetch_active_tournament_with_link`, once inside the reused
+  `fetch_active_player`) — intentional per §7, not a bug.
+- **Verification performed:** `python -m unittest test_bot` — all 19 tests
+  pass (12 pre-existing + 7 new). Module import-safety re-confirmed (`import
+  bot` remains side-effect-free). **Not yet verified:** live testing against
+  RFC-007's seed fixtures in a real Supabase project (`giovlacouture`/`zou`/
+  `koloina` happy-path and no-current-match branches, a live
+  `no_challonge_link` tournament, a forced Supabase outage) — this is
+  RFC-010's E2E-checklist responsibility per §10, not re-done here.
+- **No deviations from the plan** — the implementation follows §3.1–3.5, §7
+  or the file exactly as drafted; no workarounds were needed.

@@ -98,5 +98,40 @@ class RenderTeamTextTests(unittest.TestCase):
         self.assertNotRegex(body, r"`{3,}")
 
 
+class PickOpponentIdTests(unittest.TestCase):
+    """RFC-009 §7/§10: pure logic for the "current match -> opponent id" step,
+    tested directly against RFC-007-shaped fixture dicts (no network)."""
+
+    def test_no_matches_returns_none(self):
+        self.assertIsNone(bot.pick_opponent_id(1, []))
+
+    def test_own_id_on_player1_side(self):
+        matches = [{"player1_challonge_id": 1, "player2_challonge_id": 2, "round": 1}]
+        self.assertEqual(bot.pick_opponent_id(1, matches), 2)
+
+    def test_own_id_on_player2_side(self):
+        matches = [{"player1_challonge_id": 2, "player2_challonge_id": 1, "round": 1}]
+        self.assertEqual(bot.pick_opponent_id(1, matches), 2)
+
+    def test_multiple_open_matches_picks_highest_round(self):
+        matches = [
+            {"player1_challonge_id": 1, "player2_challonge_id": 2, "round": 1},
+            {"player1_challonge_id": 1, "player2_challonge_id": 3, "round": 2},
+        ]
+        self.assertEqual(bot.pick_opponent_id(1, matches), 3)
+
+    def test_null_other_side_treated_as_no_match(self):
+        matches = [{"player1_challonge_id": 1, "player2_challonge_id": None, "round": 1}]
+        self.assertIsNone(bot.pick_opponent_id(1, matches))
+
+    def test_self_referential_match_treated_as_no_match(self):
+        matches = [{"player1_challonge_id": 1, "player2_challonge_id": 1, "round": 1}]
+        self.assertIsNone(bot.pick_opponent_id(1, matches))
+
+    def test_own_id_absent_from_match_treated_as_no_match(self):
+        matches = [{"player1_challonge_id": 2, "player2_challonge_id": 3, "round": 1}]
+        self.assertIsNone(bot.pick_opponent_id(1, matches))
+
+
 if __name__ == "__main__":
     unittest.main()

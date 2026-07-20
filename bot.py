@@ -195,21 +195,222 @@ async def _fetch_player_in_tournament(session: aiohttp.ClientSession, tournament
     return ("ok", rows[0]) if rows else ("not_found", None)
 
 
+async def _fetch_active_tournament_with_link(session: aiohttp.ClientSession) -> tuple[str, dict | None]:
+    """Sibling to `_fetch_active_tournament_id` with a wider `select` (also
+    fetches `challonge_tournament_id`) for RFC-009's own needs. Kept separate
+    rather than widening that v2.0 helper's contract (RFC-009 §3.2).
+
+    Returns ("ok", {"id": ..., "challonge_tournament_id": ...|None}),
+    ("no_active", None), or ("unavailable", None).
+    """
+    url = f"{SUPABASE_URL}/rest/v1/tournaments"
+    params = {"is_active": "eq.true", "select": "id,challonge_tournament_id", "limit": "1"}
+    async with session.get(url, params=params) as resp:
+        if resp.status != 200:
+            print(f"fetch_current_opponent: tournaments query failed (status {resp.status})")
+            return ("unavailable", None)
+        rows = await resp.json()
+    return ("ok", rows[0]) if rows else ("no_active", None)
+
+
+async def _fetch_participant_id(session: aiohttp.ClientSession, tournament_id,
+                                 normalized_name: str) -> tuple[str, int | None]:
+    """Resolve `normalized_name`'s cached Challonge participant id within
+    `tournament_id`. Returns ("ok", id), ("requester_not_found", None), or
+    ("unavailable", None)."""
+    url = f"{SUPABASE_URL}/rest/v1/challonge_participants_cache"
+    params = {
+        "tournament_id": f"eq.{tournament_id}",
+        "ingame_name": f"ilike.{_escape_ilike(normalized_name)}",
+        "select": "challonge_participant_id",
+        "limit": "1",
+    }
+    async with session.get(url, params=params) as resp:
+        if resp.status != 200:
+            print(f"fetch_current_opponent: participants query failed (status {resp.status})")
+            return ("unavailable", None)
+        rows = await resp.json()
+    return ("ok", rows[0]["challonge_participant_id"]) if rows else ("requester_not_found", None)
+
+
+async def _fetch_open_matches(session: aiohttp.ClientSession, tournament_id,
+                               participant_id: int) -> tuple[str, list[dict]]:
+    """Return the (at most one, DB-side highest-`round`-first) `open` match
+    rows involving `participant_id`. Returns ("ok", rows) or
+    ("unavailable", None)."""
+    url = f"{SUPABASE_URL}/rest/v1/challonge_matches_cache"
+    params = {
+        "tournament_id": f"eq.{tournament_id}",
+        "state": "eq.open",
+        "or": f"(player1_challonge_id.eq.{participant_id},player2_challonge_id.eq.{participant_id})",
+        "select": "player1_challonge_id,player2_challonge_id,round",
+        "order": "round.desc",
+        "limit": "1",
+    }
+    async with session.get(url, params=params) as resp:
+        if resp.status != 200:
+            print(f"fetch_current_opponent: matches query failed (status {resp.status})")
+            return ("unavailable", None)
+        rows = await resp.json()
+    return ("ok", rows)
+
+
+async def _fetch_participant_name(session: aiohttp.ClientSession, tournament_id,
+                                   participant_id: int) -> tuple[str, str | None]:
+    """Resolve a cached Challonge participant id back to its `ingame_name`.
+    Returns ("ok", name), ("not_found", None), or ("unavailable", None)."""
+    url = f"{SUPABASE_URL}/rest/v1/challonge_participants_cache"
+    params = {
+        "tournament_id": f"eq.{tournament_id}",
+        "challonge_participant_id": f"eq.{participant_id}",
+        "select": "ingame_name",
+        "limit": "1",
+    }
+    async with session.get(url, params=params) as resp:
+        if resp.status != 200:
+            print(f"fetch_current_opponent: participant-name query failed (status {resp.status})")
+            return ("unavailable", None)
+        rows = await resp.json()
+    return ("ok", rows[0]["ingame_name"]) if rows else ("not_found", None)
+
+
+def pick_opponent_id(own_id: int, matches: list[dict]) -> int | None:
+    """Pure logic (RFC-009 §7): given the caller's cached participant id and
+    candidate `open` match rows (each with `player1_challonge_id`,
+    `player2_challonge_id`, `round`), pick the opponent's id.
+
+    - Empty `matches` -> None (no current match).
+    - More than one row -> the highest `round` wins (defensive tie-break;
+      the live query already sorts/limits this way, but this function is
+      written to resolve it independently so it's unit-testable in isolation).
+    - Degenerate rows (own id not actually on either side, both sides equal
+      the caller, or the other side is null/bye) -> None, rather than
+      crashing or returning a nonsensical opponent.
+    """
+    if not matches:
+        return None
+    match = max(matches, key=lambda m: m.get("round") or 0)
+    p1, p2 = match.get("player1_challonge_id"), match.get("player2_challonge_id")
+    if p1 == own_id and p2 is not None and p2 != own_id:
+        return p2
+    if p2 == own_id and p1 is not None and p1 != own_id:
+        return p1
+    return None
+
+
+async def fetch_current_opponent(normalized_own_name: str) -> tuple[str, dict | None]:
+    """Resolve the caller's current opponent via RFC-007's Challonge cache
+    tables, then reuse `fetch_active_player` verbatim for the final
+    `team_text` lookup (RFC-009 §3.2).
+
+    Never raises: any network/timeout/non-200/parse failure maps to
+    ("unavailable", None). Returns exactly one of:
+      ("ok", player_dict)          -- opponent resolved; player is their OTS row
+      ("no_active", None)          -- zero active tournaments
+      ("no_challonge_link", None)  -- active tournament has no Challonge link
+      ("requester_not_found", None)-- caller absent from cached participants
+      ("no_current_match", None)   -- caller found, no open match involves them
+      ("opponent_no_ots", None)    -- opponent resolved, but no players row
+      ("unavailable", None)        -- any Supabase read failure/timeout
+    """
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+    }
+    timeout = aiohttp.ClientTimeout(total=5)
+
+    try:
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+            status, tournament = await _fetch_active_tournament_with_link(session)
+            if status != "ok":
+                return (status, None)
+            tournament_id = tournament["id"]
+            if tournament["challonge_tournament_id"] is None:
+                return ("no_challonge_link", None)
+
+            status, own_id = await _fetch_participant_id(session, tournament_id, normalized_own_name)
+            if status != "ok":
+                return (status, None)
+
+            status, matches = await _fetch_open_matches(session, tournament_id, own_id)
+            if status != "ok":
+                return (status, None)
+
+            opponent_id = pick_opponent_id(own_id, matches)
+            if opponent_id is None:
+                return ("no_current_match", None)
+
+            status, opponent_name = await _fetch_participant_name(session, tournament_id, opponent_id)
+            if status == "unavailable":
+                return ("unavailable", None)
+            if status == "not_found":
+                print(
+                    "fetch_current_opponent: cache inconsistency: match "
+                    f"references unknown participant id {opponent_id} "
+                    f"(tournament {tournament_id})"
+                )
+                return ("unavailable", None)
+    except Exception as exc:
+        print(f"fetch_current_opponent: request error: {exc!r}")
+        return ("unavailable", None)
+
+    status, player = await fetch_active_player(normalize_name(opponent_name))
+    if status == "ok":
+        return ("ok", player)
+    if status == "not_found":
+        print(
+            f"fetch_current_opponent: opponent '{opponent_name}' resolved via "
+            f"Challonge cache but has no players.team_text row (tournament {tournament_id})"
+        )
+        return ("opponent_no_ots", None)
+    if status == "no_active":
+        print(
+            "fetch_current_opponent: active tournament was deactivated mid-request "
+            "during the final team_text lookup"
+        )
+        return ("unavailable", None)
+    return ("unavailable", None)  # "unavailable" already logged by fetch_active_player itself
+
+
 @tree.command(
     name="ots",
-    description="Obtenir l'OTS associé à un nom d'utilisateur",
+    description="Découvrez l'OTS de votre adversaire actuel",
     guild=discord.Object(id=GUILD_ID),
 )
-@app_commands.describe(username="Le nom d'utilisateur dont vous souhaitez obtenir l'OTS")
+@app_commands.describe(username="Votre propre nom d'utilisateur dans le tournoi (pas celui de votre adversaire)")
 async def ots(interaction: discord.Interaction, username: str):
     await interaction.response.defer(ephemeral=True)
 
     normalized = normalize_name(username)
-    status, player = await fetch_active_player(normalized)
+    status, player = await fetch_current_opponent(normalized)
 
     if status == "no_active":
         await interaction.followup.send(
             "⚠️ Aucun tournoi actif pour le moment. Réessayez plus tard.",
+            ephemeral=True,
+        )
+        return
+    if status == "no_challonge_link":
+        await interaction.followup.send(
+            "❌ Ce tournoi n'est pas relié à Challonge. Impossible de déterminer votre adversaire actuel.",
+            ephemeral=True,
+        )
+        return
+    if status == "requester_not_found":
+        await interaction.followup.send(
+            f"❌ Aucun participant nommé **{username}** trouvé dans le bracket Challonge de ce tournoi.",
+            ephemeral=True,
+        )
+        return
+    if status == "no_current_match":
+        await interaction.followup.send(
+            "ℹ️ Vous n'avez pas de match en cours pour le moment.",
+            ephemeral=True,
+        )
+        return
+    if status == "opponent_no_ots":
+        await interaction.followup.send(
+            "⚠️ Votre adversaire a été trouvé, mais son OTS n'est pas encore enregistré. Contactez l'organisateur.",
             ephemeral=True,
         )
         return
@@ -219,15 +420,9 @@ async def ots(interaction: discord.Interaction, username: str):
             ephemeral=True,
         )
         return
-    if status == "not_found":
-        await interaction.followup.send(
-            f"❌ Aucun joueur nommé **{username}** dans le tournoi en cours.",
-            ephemeral=True,
-        )
-        return
 
     embed = discord.Embed(
-        title=f"OTS de {username}",
+        title=f"OTS de {player['ingame_name']}",
         description=render_team_text(player["team_text"]),
         color=0x3B4CCA,
     )
