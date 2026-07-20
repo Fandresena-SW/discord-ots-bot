@@ -19,7 +19,7 @@ planning breakdown for the Supabase-backed backoffice release.
 | Priority | Count | Feature IDs |
 |----------|-------|-------------|
 | Must     | 17    | F1, F2, F3, F4, F7, F8, F9, F10, F11, F12, F13, F14, F15, F19, F22, F23, F24 |
-| Should   | 4     | F6, F16, F20, F26 |
+| Should   | 3     | F6, F16, F20 |
 | Could    | 2     | F5, F21 |
 | Won't    | 7     | F25 (a–g) |
 
@@ -284,3 +284,243 @@ planning breakdown for the Supabase-backed backoffice release.
   release-gating for the "survive a live event" goal (PRD G6); F21 is contingent.
 - **Highest technical risk:** F11 (core command-path refactor) and F14
   (correct char-accounting + fence escaping).
+
+---
+
+# v3.0 — Challonge Integration (RFC-007–010)
+
+Derived from the v3.0 change-management analysis (chat-based PRD-change review,
+2026-07-20). Picks up **F25(e)** ("real-time pairings... deferred") from the v2.0
+Won't-have list. Feature IDs continue from v2.0 (`F26` onward); the pre-existing
+dangling `F26` reference in the v2.0 Should-priority summary above was a stray/unused
+ID with no corresponding feature — corrected when this section was added.
+
+**Goal:** a player runs `/ots <their own username>` and the bot resolves who their
+*current opponent* is (via organizer-managed Challonge bracket data, cached in
+Supabase) and returns the **opponent's** OTS — no need to already know the
+opponent's name. This is an intentional, one-time **behavior change** to `/ots`'s
+existing argument semantics (see RFC-009), not an additive mode.
+
+**Locked architecture decisions for v3.0** (do not re-litigate in RFC-008/009/010):
+- Single-active-tournament model is retained; each `tournaments` row may optionally
+  link to one Challonge tournament via `challonge_tournament_id`.
+- `bot.py` never calls the Challonge API directly — it only ever reads Supabase via
+  the existing PostgREST pattern (preserves the v2.0 locked decision, PRD §11.5,
+  that the bot has zero heavy/new runtime dependencies).
+- The Challonge sync job is a **Supabase Edge Function** (TypeScript/Deno), not
+  `pg_cron`/`pg_net` — chosen for correctness/debuggability of the JSON-handling and
+  upsert logic over plpgsql, even though it's the first non-Python runtime in this
+  project.
+- The sync is **manually triggered by the organizer** (a documented `curl`/shell
+  command, secret-protected), not polled on a schedule — the organizer is the same
+  person who validates every pairing result in Challonge, so a trigger immediately
+  after each round's results are validated is always safe to treat as fresh. This
+  keeps Challonge API call volume trivial relative to their free-tier cap (500
+  requests/month, enforced since 2026-07-06) — no cadence-tuning problem exists.
+- Player identity is joined by **exact normalized username** between Challonge
+  participant names and Supabase `players.ingame_name` — no reconciliation beyond
+  the existing trim+lower contract (RFC-001/004); the organizer is responsible for
+  keeping the two systems' names in sync.
+- If the active tournament has **no** `challonge_tournament_id` set, `/ots` **hard-fails**
+  with a distinct French message (no fallback to the old v2.0 arbitrary-lookup
+  behavior) — a deliberate simplification, not an oversight.
+- A **passive staleness backstop**: if the cache's `fetched_at` is older than **48h**,
+  log a server-side warning (operator-only signal, never blocks players) — consistent
+  with the v2.0 "fail-soft must not mean fail-silent for the operator" rule (§5.3 P0).
+
+## Summary
+
+| RFC | Scope | Feature IDs |
+|-----|-------|-------------|
+| **007** | Schema: Challonge link column, two cache tables, RLS, seed/test data | F26–F29 |
+| **008** | Supabase Edge Function: secret-protected, full-refresh-on-trigger sync | F30–F31 |
+| **009** | `/ots` refactor: opponent-resolution query, expanded fail-soft, copy | F32–F34 |
+| **010** | Runbook, staleness backstop, E2E checklist, dry-run, release | F35–F37 |
+
+**Total v3.0 features:** 12 (F26–F37)
+
+### By priority
+| Priority | Count | Feature IDs |
+|----------|-------|-------------|
+| Must     | 11    | F26, F27, F28, F29, F30, F31, F32, F33, F34, F35, F37 |
+| Should   | 1     | F36 |
+| Could    | 0     | — |
+| Won't    | 0     | — *(v3.0 doesn't reopen any v2.0 Won't-have except F25(e), already tracked there)* |
+
+### By complexity
+| Complexity | IDs |
+|------------|-----|
+| Low | F26, F27, F29, F31, F34, F35, F36 |
+| Medium | F28, F30, F33, F37 |
+| High | F32 |
+
+## H. Data model & sync (RFC-007)
+
+### F26 — `tournaments.challonge_tournament_id` link
+- **Priority:** Must · **Persona:** SYS/ORG · **Complexity:** Low
+- **Description:** Nullable column on `tournaments` holding the linked Challonge
+  tournament identifier (numeric id or url slug, per Challonge API v1). `NULL` means
+  "this tournament has no Challonge integration" (drives F34's hard-fail path).
+- **Acceptance criteria:** Column exists, nullable, no default; existing rows
+  (from v2.0) are unaffected and remain valid with `NULL`.
+
+### F27 — `challonge_participants_cache` table
+- **Priority:** Must · **Persona:** SYS · **Complexity:** Low
+- **Description:** Caches Challonge participant id → normalized `ingame_name` per
+  tournament, refreshed wholesale on each manual trigger (F30).
+- **Acceptance criteria:** Unique per `(tournament_id, challonge_participant_id)` and
+  per `(tournament_id, ingame_name)`; FK cascades on tournament delete.
+
+### F28 — `challonge_matches_cache` table
+- **Priority:** Must · **Persona:** SYS · **Complexity:** Medium
+- **Description:** Caches Challonge match rows (`state`, `round`, both sides'
+  participant ids, `winner_challonge_id`) per tournament, refreshed wholesale on
+  each manual trigger. `state = 'open'` is what RFC-009's opponent-resolution query
+  filters on.
+- **Acceptance criteria:** Unique per `(tournament_id, challonge_match_id)`; FK
+  cascades on tournament delete; nullable participant-id columns represent
+  byes/not-yet-fed-in slots (mirrors Challonge's own nullability).
+
+### F29 — RLS + idempotent seed/test data for new tables
+- **Priority:** Must · **Persona:** SYS · **Complexity:** Low
+- **Description:** Same deny-by-default RLS posture as `tournaments`/`players`
+  (RFC-003's tracked follow-up); idempotent seed data so RFC-008/009 have fixtures
+  to test against without a live Challonge account.
+- **Acceptance criteria:** RLS enabled on both new tables, no policies; `schema.sql`
+  re-run produces no error/duplicates.
+
+## I. Challonge sync (RFC-008)
+
+### F30 — Full-refresh Edge Function (manual trigger)
+- **Priority:** Must · **Persona:** SYS/ORG · **Complexity:** Medium · **PRD:** v3.0 addendum §18.2
+- **Description:** A Supabase Edge Function (TypeScript/Deno) that, on
+  invocation, calls the Challonge API for the target tournament's participants
+  and matches and upserts them wholesale into RFC-007's cache tables.
+- **Acceptance criteria:**
+  - Exactly 2 Challonge API calls per invocation (participants, matches),
+    regardless of tournament size.
+  - Cache tables reflect Challonge's current state after invocation — re-running
+    produces no duplicate rows, and changed `state` values update in place
+    (upsert, not append, per RFC-007's contract).
+  - An invalid/missing `challonge_tournament_id` on the target tournament fails
+    loudly (a clear error in the function's response/logs), never silently.
+- **Technical considerations:** lives under `supabase/functions/` — a new
+  directory, a documented exception to RULES §2 ("no new folders"). Uses
+  Challonge API v1's static-key HTTP Basic auth (no OAuth/token refresh needed
+  for a single-organizer-account integration).
+- **Edge cases:** Challonge unreachable/rate-limited/5xx at trigger time → the
+  function returns an error and the cache stays at its last successful refresh;
+  the upsert must not begin writing until both API calls succeed, so a partial
+  failure never leaves one cache table refreshed and the other stale in a
+  misleading combination.
+
+### F31 — Secret-protected invocation
+- **Priority:** Must · **Persona:** SYS/ORG · **Complexity:** Low · **PRD:** v3.0 addendum §18.2, §18.4
+- **Description:** The Edge Function's manual-trigger endpoint requires a
+  shared secret (not the public anon key) in the request, so only the
+  organizer can invoke it.
+- **Acceptance criteria:** an invocation without the correct secret is
+  rejected; the documented `curl`/shell command in the RFC-010 runbook
+  includes the secret from the organizer's own notes/env, never committed to
+  the repo.
+- **Technical considerations:** secret held in the Edge Function's own
+  Supabase environment config, entirely separate from `bot.py`'s env vars.
+- **Edge cases:** secret rotation has no automated process — a manual
+  procedure if ever needed, out of scope for this addendum.
+
+## J. Discord bot / opponent resolution (RFC-009)
+
+### F32 — Opponent-resolution query
+- **Priority:** Must · **Persona:** PLR/SYS · **Complexity:** High · **PRD:** v3.0 addendum §18.3
+- **Description:** Given the caller's normalized username, resolve their
+  `challonge_participant_id` via `challonge_participants_cache`, find the
+  `state = 'open'` row in `challonge_matches_cache` where that id appears on
+  either side, and resolve the *other* side's id back to a name.
+- **Acceptance criteria:**
+  - The happy path resolves correctly against RFC-007's seed fixtures
+    (giovlacouture ↔ zou).
+  - A name absent from the cache routes to the "requester not found" outcome
+    (F33).
+  - A participant with no `open` match routes to the "no current match"
+    outcome (F33).
+- **Technical considerations:** two PostgREST reads against the new cache
+  tables, same trim+lower normalization as v2.0's existing lookup; the *final*
+  step (opponent name → `team_text`) reuses v2.0's existing
+  `fetch_active_player`-style query **verbatim** — the one piece of v2.0 logic
+  this addendum doesn't touch.
+- **Edge cases:** more than one `open` match for the same participant
+  shouldn't happen in a well-formed bracket but isn't schema-prevented — pick
+  deterministically (e.g. highest `round`) as a defensive default, not an
+  expected case.
+
+### F33 — Expanded fail-soft (7 outcomes) + updated French copy
+- **Priority:** Must · **Persona:** PLR · **Complexity:** Medium · **PRD:** v3.0 addendum §18.3
+- **Description:** distinct French messages for each of the seven outcomes in
+  PRD §18.3, replacing/extending v2.0's three; updated slash-command
+  description text reflecting the new "type your own name" meaning.
+- **Acceptance criteria:** each of the seven outcomes yields its own clear
+  French message; no unhandled exception reaches the user; the command's
+  Discord-visible description no longer implies "the player you want to look
+  up."
+- **Technical considerations:** outcome 4 (no current match) intentionally
+  covers bye/eliminated/not-started-yet with **one** generic message (PRD
+  §24.7 — a default taken, open for revision).
+- **Edge cases:** outcome 5 (opponent resolved but no `team_text` row) must be
+  distinguishable **server-side** (logged) from outcome 3 (requester not
+  found) even though both may look similarly apologetic to a player — the
+  organizer's diagnosis needs the distinction even where the copy doesn't.
+
+### F34 — No-Challonge-link hard-fail
+- **Priority:** Must · **Persona:** PLR/SYS · **Complexity:** Low · **PRD:** v3.0 addendum §18.3, §24.4 · ties to F26
+- **Description:** when the active tournament's `challonge_tournament_id IS
+  NULL`, `/ots` fails with a distinct French message rather than falling back
+  to v2.0's arbitrary-lookup behavior.
+- **Acceptance criteria:** a tournament created without a Challonge link
+  behaves this way from the moment it's activated; no code path reintroduces
+  the old lookup.
+- **Technical considerations:** the simplest new branch — a single null-check
+  before F32's resolution logic even runs.
+- **Edge cases:** none beyond the null-check itself.
+
+## K. Reliability & release (RFC-010)
+
+### F35 — Runbook: linking + trigger procedure
+- **Priority:** Must · **Persona:** ORG · **Complexity:** Low · **PRD:** v3.0 addendum §17, §20 (Journeys E/F)
+- **Description:** `RUNBOOK.md` gets a new procedure — link a tournament to
+  Challonge (`challonge_tournament_id`), keep names identical across both
+  systems, and the exact discipline for triggering a refresh (immediately
+  after validating a round's results, before any further Challonge change).
+- **Acceptance criteria:** a first-time organizer can follow the runbook to
+  link a tournament and populate the cache without external help.
+- **Technical considerations:** documents the exact `curl`/shell command, with
+  the secret redacted/placeholder in the doc itself.
+- **Edge cases:** what to do if a trigger is forgotten — re-trigger as soon as
+  noticed; F36 covers detection.
+
+### F36 — 48h staleness warning
+- **Priority:** Should · **Persona:** SYS/ORG · **Complexity:** Low · **PRD:** v3.0 addendum §18.3 (outcome 7), §19
+- **Description:** a passive, server-side-only check/log when a tournament's
+  cache `fetched_at` exceeds 48h old — never blocks a player, purely an
+  operator signal (mirrors v2.0's "fail-soft must not mean fail-silent for the
+  operator," RULES §7, F22).
+- **Acceptance criteria:** a cache older than 48h produces a server-side log
+  entry on the next `/ots` invocation against it; player-visible behavior is
+  unaffected.
+- **Technical considerations:** a cheap timestamp comparison against
+  `MAX(fetched_at)` for the tournament's cache rows, folded into the existing
+  read path — no separate scheduled check needed.
+- **Edge cases:** a tournament correctly idle between events would log
+  repeatedly if `/ots` is invoked against it — acceptable since the warning is
+  operator-only and cheap; not worth suppressing repeats for this addendum.
+
+### F37 — E2E checklist, dry-run, release
+- **Priority:** Must · **Persona:** ORG/SYS · **Complexity:** Medium · **PRD:** v3.0 addendum §21, §22
+- **Description:** mirrors RFC-006's pattern — an in-guild checklist exercising
+  all seven fail-soft outcomes (F33/F34) plus the happy path (F32), against a
+  real or realistically seeded Challonge tournament, before this addendum ships.
+- **Acceptance criteria:** all scenarios pass; release sign-off recorded the
+  same way RFC-006's Completion record was.
+- **Technical considerations:** needs either a real Challonge test tournament
+  or reliance on RFC-007's seed fixtures for the parts that don't require live
+  Challonge API calls.
+- **Edge cases:** none beyond the thoroughness of the checklist itself.

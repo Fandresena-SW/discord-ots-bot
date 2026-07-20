@@ -218,3 +218,257 @@ against oversized + fence-breaking input; no secret committed or logged;
   let code and docs drift.
 - **Respect the fail-soft ethos everywhere:** a player at a live event should
   never see a crash; an organizer should always have a log to diagnose from.
+
+---
+
+# v3.0 Addendum — Challonge Integration
+
+Guardrails for RFC-007–010 (the Challonge-based opponent-resolution feature).
+Derived from `knowledge/PRD.md` §14–26 (v3.0 addendum) and `knowledge/FEATURES.md`
+§"v3.0 — Challonge Integration" (F26–F37). **Sections 1–10 above remain fully
+binding** — this addendum only adds or narrowly amends what v3.0 changes.
+Same locked-decision posture: treat these as binding unless the PRD v3.0
+addendum is formally changed.
+
+> **v3.0 prime directive:** the tiny-single-file ethos (prime directive above)
+> still holds for `bot.py`. The *one* deliberate exception is an isolated Supabase Edge
+> Function for Challonge I/O (§12 below) — it does not license any other new
+> component, dependency, or abstraction.
+
+---
+
+## 11. Technology stack (v3.0 additions)
+
+| Concern | Choice | Notes |
+|---------|--------|-------|
+| Bracket data source | **Challonge API v1** (hosted SaaS) | HTTP Basic auth, static API key — no OAuth/token refresh. Read-only from this project's side; never write/mutate Challonge data. |
+| Sync runtime | **Supabase Edge Function (TypeScript/Deno)** | The **first non-Python runtime component** in this repo. Chosen over `pg_cron`/`pg_net` because correct JSON handling + upsert logic is materially easier in TypeScript (PRD §18.2, §24.2 — locked). |
+| Sync trigger | **Manual, secret-protected HTTP call** (organizer-run `curl`/shell), never a scheduled poll | Load-bearing for staying under Challonge's 500 req/month free-tier cap (PRD §19, §24.3 — locked), not a convenience choice. |
+
+**Dependency policy (v3.0 addition):** the Edge Function may use whatever
+minimal Deno/TypeScript stdlib or Supabase-provided runtime APIs it needs to
+call Challonge and upsert into Postgres — this is a separate runtime from
+`bot.py` and is **not** subject to §1's "no new Python dependency" policy, but
+the same minimalism spirit applies: no framework, no ORM, no second HTTP
+client library beyond `fetch`.
+
+---
+
+## 12. Architecture & code organization (v3.0 exception)
+
+- **New folder, explicitly permitted:** `supabase/functions/` (Edge Function
+  source). This is a **documented exception to §2's "no new folders/packages"**,
+  scoped narrowly to Challonge sync code — it does not open the door to
+  splitting `bot.py` itself or adding other new directories.
+- **`bot.py` gains zero new runtime dependencies.** It never calls the
+  Challonge API, directly or indirectly, at any point — it only ever reads the
+  RFC-007 cache tables via the existing PostgREST/`aiohttp` seam (§1 above),
+  exactly like it reads `tournaments`/`players` today. This is locked (PRD
+  §18.2, §24 item 3) — do not "simplify" by having the bot call Challonge
+  directly, even for a quick fix.
+- **Cache tables are the only interface between the two runtimes.** The Edge
+  Function writes; `bot.py` reads. Neither side reaches into the other's
+  runtime or shares code.
+- **Full refresh, not incremental sync.** The Edge Function always re-fetches
+  and upserts *all* participants + matches for the target tournament (2
+  Challonge API calls total) on every trigger — never a delta/partial sync.
+  This is a deliberate simplicity choice given low trigger volume (PRD §18.2),
+  not a shortcut to revisit under normal circumstances.
+
+---
+
+## 13. Naming & style (v3.0 additions)
+
+- New DB identifiers — `challonge_tournament_id`, `challonge_participants_cache`,
+  `challonge_matches_cache`, `challonge_participant_id`, `challonge_match_id`,
+  `fetched_at` — are English, `snake_case`, consistent with existing
+  `tournaments`/`players` naming. Do not rename.
+- `state` on `challonge_matches_cache` mirrors Challonge's own vocabulary
+  verbatim: `pending` / `open` / `complete`. Do not translate or remap these
+  values — they are an external contract, not internal UI copy.
+- Edge Function source: standard TypeScript/Deno conventions (the ecosystem's
+  own idioms, not Python's) — this is the one place PEP 8 doesn't apply.
+- User-facing `/ots` strings stay **French**, unchanged posture from §3 —
+  including all newly-added fail-soft messages (§17 below) and the updated
+  slash-command description reflecting the "type your own name" meaning.
+
+---
+
+## 14. Data handling & the Challonge cache contract
+
+- **Reuse, don't reinvent, the trim+lower identity contract.**
+  `challonge_participants_cache.ingame_name` reuses RFC-001's
+  `trim_ingame_name()` trigger function verbatim — do not write a second
+  normalization implementation for this table.
+- **Upsert semantics are mandatory, not incidental:** both cache tables are
+  refreshed via `on conflict (...) do update` on every trigger — a re-trigger
+  must never accumulate duplicate or stale rows. If you touch the Edge
+  Function's write logic, preserve this exactly.
+- **All-or-nothing per refresh:** the upsert must not begin writing until both
+  Challonge API calls (participants, matches) have succeeded — a partial
+  failure must never leave one cache table refreshed and the other stale in a
+  misleading combination (PRD-adjacent, RFC-007 §"Edge cases").
+- **`state` is a strict enum** (`pending`/`open`/`complete`) enforced by a DB
+  `check` constraint. An unrecognized value from a future Challonge API change
+  must fail the upsert loudly (error/log), never silently store an unknown
+  value. This is deliberate — do not loosen the constraint to "make an error
+  go away."
+- **Name-sync between Challonge and Supabase is an organizer responsibility,
+  not a code problem.** No reconciliation/fuzzy-matching is in scope — a
+  mismatch is a fail-soft outcome (§17, F33), not something the sync logic
+  should try to "fix" (e.g. by fuzzy name matching).
+- **Cache tables are disposable, not a backup of record.** Unlike
+  `tournaments`/`players`, they can be fully re-derived from Challonge at any
+  time via a re-trigger — do not add backup/retention logic for them.
+- RLS: same deny-by-default posture as `tournaments`/`players` (§4 above,
+  RFC-003 precedent) — enabled, no policies, service-key-only access from both
+  the bot and the Edge Function.
+
+---
+
+## 15. The `/ots` command path — v3.0 opponent-resolution contract
+
+v3.0 **changes**, not extends, `/ots`'s argument meaning — this is an
+intentional, confirmed one-time behavior break (PRD §17, §24 item 4), not a
+regression to avoid. Do not add a flag/mode to preserve the old "look up any
+name" behavior as a fallback.
+
+1. **No-link hard-fail first:** if the active tournament's
+   `challonge_tournament_id IS NULL`, fail immediately with a distinct French
+   message (F34) — before any resolution logic runs. Never fall back to v2.0's
+   arbitrary-lookup behavior for a tournament without a Challonge link.
+2. **Resolution order** (F32): normalize the caller's own input (same
+   `trim()`+`lower()` as v2.0) → resolve their `challonge_participant_id` via
+   `challonge_participants_cache` → find the `state = 'open'` row in
+   `challonge_matches_cache` where that id appears on either side → resolve
+   the *other* side's id back to a name.
+3. **Reuse v2.0's read path verbatim for the final step.** Opponent name →
+   `players.team_text` lookup is the *same* query v2.0 already has — do not
+   duplicate or reimplement it.
+4. **More than one `open` match for the same participant** (malformed bracket,
+   not schema-prevented): pick deterministically (e.g. highest `round`) as a
+   defensive default — do not raise this to the player as an error.
+5. Everything downstream of a resolved opponent (embed build, delivery,
+   render-safety) is **unchanged from v2.0 §5** — do not touch that code path.
+
+---
+
+## 16. Security (v3.0 additions)
+
+- **Challonge API key and the Edge Function trigger secret live only in the
+  Edge Function's own Supabase environment config** — never in `bot.py`'s env
+  vars, never committed, never logged. Same "worker/operator-only secret"
+  posture as the existing Supabase service key (§6 above).
+- **The trigger endpoint requires the shared secret**, not the public anon
+  key — an invocation without it must be rejected. The documented `curl`
+  command in the runbook uses a placeholder for the secret, never a real value
+  committed to the repo.
+- Secret rotation has no automated process in v3.0 scope — a manual procedure
+  if ever needed; do not build rotation tooling speculatively.
+
+---
+
+## 17. Error handling & logging (v3.0 — expanded fail-soft)
+
+`/ots` now has **(at least) seven** distinct fail-soft outcomes (PRD §18.3,
+F33) — up from v2.0's three. Each needs its **own** clear French message:
+
+1. No active tournament (unchanged from v2.0).
+2. Active tournament has no Challonge link (`challonge_tournament_id IS NULL`).
+3. Requester's username not found in the cached Challonge participants.
+4. Requester found, but no `open` match involves them right now — **one**
+   generic message covers bye / eliminated / round-not-started (a taken
+   default, not separately confirmed — see §20 open items).
+5. Opponent resolved, but no matching `players.team_text` row exists (a
+   name-sync gap). **Must be distinguishable server-side (logged) from outcome
+   3**, even though both may read similarly to a player.
+6. Supabase read unavailable/timeout (unchanged from v2.0).
+7. *(Operator-only, never player-facing)* cache older than 48h — logged as a
+   server-side warning, never blocks the player.
+
+- **No unhandled exception may reach the interaction response** — same rule as
+  §7 above, now covering the Challonge-cache read paths too.
+- **Staleness is a passive log check, not a gate.** Comparing
+  `MAX(fetched_at)` against a 48h threshold happens inline on the existing
+  read path — do not build a separate scheduled job for it.
+- Fail-soft still must not mean fail-silent for the operator (§7's rule holds
+  unchanged) — every new failure mode above needs a server-side log line with
+  enough detail to diagnose.
+
+---
+
+## 18. Testing & quality gates (v3.0)
+
+- **RFC-007's seed fixtures are the baseline test data** for RFC-008/009 —
+  build and test the opponent-resolution query against them before requiring a
+  live Challonge account. Do not skip this by hand-waving "test against
+  production Challonge."
+- **Pure-logic testing precedent from RFC-004 extends here:** if
+  opponent-resolution logic (§15) can be factored into a small pure function
+  (cache rows in → resolved name or fail-soft reason out), add lightweight
+  `unittest` coverage the same way F14/F12 were tested. Do not build test
+  infrastructure beyond what this needs.
+- **E2E checklist expands to cover all seven fail-soft outcomes (§17) plus the
+  happy path (F32)**, mirroring RFC-006's release-gate pattern (F37). This is
+  the primary release gate for RFC-010, same as the v2.0 checklist was for
+  RFC-006.
+- **Edge Function verification is manual/operational**, not a Python test
+  suite: confirm exactly 2 Challonge API calls per invocation, confirm re-runs
+  upsert without duplicating rows, confirm an invalid/missing
+  `challonge_tournament_id` fails loudly.
+- Accessibility/responsive design: still **N/A** (§8 above holds — Discord
+  embed output only).
+
+---
+
+## 19. Implementation priorities (v3.0 MoSCoW & build order)
+
+Strictly sequential — **007 → 008 → 009 → 010**, each depending on all
+lower-numbered RFCs (including all of v2.0). No parallel work, same discipline
+as v2.0 (RFCS.md).
+
+- **Must:** Challonge link column + cache tables + RLS + seed data (F26–F29),
+  the full-refresh Edge Function (F30), secret-protected invocation (F31), the
+  opponent-resolution query (F32), expanded fail-soft (F33), the no-link
+  hard-fail (F34), the runbook update (F35), and the E2E checklist/dry-run/
+  release (F37).
+- **Should:** the 48h staleness warning (F36) — desired but not release-
+  blocking on its own; ship it, but don't let it hold up F26–F35/F37.
+- **Could / Won't:** none newly introduced by v3.0 (FEATURES.md's v3.0 summary
+  has 0 in both columns) — v3.0 doesn't reopen any v2.0 Won't-have except
+  F25(e), which this addendum *is* the build-out of.
+
+**Quality thresholds before RFC-010 release:** all 7 fail-soft outcomes
+verified end-to-end; zero regression vs. the *new* `/ots` contract
+(post-announcement — the old contract is intentionally superseded, not
+preserved); `bot.py` has zero new runtime dependencies; Challonge credentials
+and trigger secret never committed or logged; cache tables confirmed
+idempotent under repeated triggers.
+
+---
+
+## 20. General working agreements (v3.0 additions)
+
+- **The `/ots` behavior change is confirmed and intentional** — if asked to
+  "also support looking up any name" as a fallback, treat that as a scope
+  change back toward v2.0's rejected default (PRD §24 item 4) and stop to
+  confirm before building it.
+- **No automatic/scheduled Challonge polling, ever**, even as an
+  "improvement" — the manual-trigger design is load-bearing for staying under
+  the free-tier API cap (§19 above), not an MVP shortcut to later "fix."
+- **Still-open items — do not silently resolve, flag instead:**
+  - Bye/eliminated/not-started copy granularity (currently one generic
+    message, PRD §24 item 7) — only split into distinct messages if
+    explicitly requested.
+  - No formal v3.0 release date is set (PRD §22) — don't assume one.
+  - RFC-008/009/010 should each restate their own acceptance criteria rather
+    than only pointing back to the PRD addendum (PRD §24 item 8).
+- **This addendum is itself a flagged gap-fill:** RFC-007 noted that no formal
+  PRD v3.0 section existed at the time it was drafted; `knowledge/PRD.md` §14–26
+  now closes that gap. If future RFCs (008–010) reveal a decision this
+  addendum doesn't cover, record it in `knowledge/PRD.md` or here — don't let
+  code and docs drift, same rule as §10 above.
+- **Won't-have bookkeeping:** once RFC-009 ships, update §9 above (v2.0's
+  Won't-have list) to note that F25(e) ("real-time pairings... deferred") has
+  been picked up by v3.0 — so §9 doesn't contradict what the bot actually does.
+  Do not make this edit prematurely, before RFC-009 actually ships.
