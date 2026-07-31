@@ -186,21 +186,27 @@ opponent resolution for whichever phase doesn't use it. Both are now stored
 
 ## Tracked follow-ups
 
-- **`CLAUDE.md`'s "What this is" / "Key mechanics" sections still describe
-  the v2.0 `/ots` contract (arbitrary-name lookup) — owner: unassigned,
-  flagged during RFC-010.** RFC-009 changed `/ots`'s argument meaning to
+- **`CLAUDE.md`'s "What this is" / "Key mechanics" sections described the v2.0
+  `/ots` contract (arbitrary-name lookup) — flagged during RFC-010.
+  ✅ Resolved 2026-07-31.** RFC-009 changed `/ots`'s argument meaning to
   "your own username → your current opponent's OTS" (an intentional,
   confirmed one-time break, PRD §17/§24 item 4), but `CLAUDE.md` (last
   touched by RFC-006, per `git log -- CLAUDE.md`) was never updated to match
-  — it still documents `fetch_active_player` as the live `/ots` read path
-  and doesn't mention `fetch_current_opponent`, the Challonge cache tables,
-  or the v3.0 fail-soft outcomes at all. RFC-010's own file list
+  — it documented `fetch_active_player` as the live `/ots` read path and
+  didn't mention `fetch_current_opponent`, the Challonge cache tables, or the
+  v3.0 fail-soft outcomes at all. RFC-010's own file list
   (`knowledge/RUNBOOK.md`, `knowledge/DEPLOYMENT.md`,
-  `knowledge/E2E-CHECKLIST-v3.md`, `.claude/RULES.md`, `bot.py`) doesn't
-  include `CLAUDE.md`, so this RFC didn't fix it — but it should be updated
-  before/alongside this addendum's release so the top-level project doc
-  doesn't actively mislead the next reader (RULES §10, "keep the docs in
-  sync"). *(Surfaced during RFC-010, 2026-07-20 — not yet resolved.)*
+  `knowledge/E2E-CHECKLIST-v3.md`, `.claude/RULES.md`, `bot.py`) didn't
+  include `CLAUDE.md`, so that RFC didn't fix it. **Fixed 2026-07-31**, right
+  after the v3.0 sign-off: "What this is" and "Key mechanics" now describe
+  `fetch_current_opponent` and its seven statuses; a new "Key mechanics
+  (`challonge-sync` Edge Function)" section was added; "Planned direction
+  (v2.0)" became a "Release history" plus a draft-marked v4.0 section; and the
+  group-stage/final-bracket dual-id trap is called out explicitly so the next
+  reader doesn't reduce the candidate set back to a single id. A convention was
+  also added — update all four status trackers (the RFC's Completion record,
+  `RFCS.md`, `PRD.md`, `CLAUDE.md`) on release — so this drift doesn't recur.
+  *(Surfaced during RFC-010, 2026-07-20; resolved 2026-07-31.)*
 
 - **RLS enablement on `tournaments` / `players` — owner: RFC-003. ✅ Resolved
   2026-07-18.** RFC-001 creates the tables but deliberately scopes RLS *out* (the
