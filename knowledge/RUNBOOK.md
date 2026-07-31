@@ -1,15 +1,18 @@
 # Runbook Organisateur — Workflows Supabase Studio
 
 - **Status:** RFC-002 sections (§0–§4) complete ; §5 (pré-vol), §6
-  (contingence / break-glass) et §7 (sauvegarde du roster) complétés par RFC-006.
+  (contingence / break-glass) et §7 (sauvegarde du roster) complétés par RFC-006 ;
+  §8 (lien Challonge + discipline de déclenchement) complété par RFC-010.
 - **Features couvertes:** F7, F8, F9, F10 (RFC-002) ; F20, F22, F24-backup
-  (RFC-006).
+  (RFC-006) ; F35 (RFC-010).
 - **PRD refs:** §5.2, §7 (Journey A & B), §8 (G2), §9 (Day 2 / Day 5 / Day 6),
-  §11.1, §12.
+  §11.1, §12 ; v3.0 addendum §17, §20 (Journeys E/F) pour §8.
 - **S'appuie sur:** RFC-001 (`schema.sql` — tables, contrainte, trigger,
-  index) ; RFC-003/005 (dégradation gracieuse déjà implémentée, vérifiée ici).
-- **Complété par:** RFC-006 a ajouté §5–§7 ci-dessous (dernière section du
-  runbook — release RFC-006 = clôture v2.0).
+  index) ; RFC-003/005 (dégradation gracieuse déjà implémentée, vérifiée ici) ;
+  RFC-007/008 (`challonge_tournament_id`, tables de cache, Edge Function
+  `challonge-sync`) pour §8.
+- **Complété par:** RFC-006 a ajouté §5–§7 ci-dessous ; RFC-010 ajoute §8
+  (dernière section du runbook — release RFC-010 = clôture v3.0).
 
 ---
 
@@ -28,6 +31,7 @@ Il documente, dans l'ordre où on les utilise :
 5. Le **pré-vol avant événement** (F20).
 6. La **contingence / procédure de secours** ("break-glass", F22).
 7. La **sauvegarde du roster de référence** (F24-backup).
+8. **Lier un tournoi à Challonge et déclencher une synchronisation** (F35).
 
 Toutes les procédures ci-dessous ont été rédigées à partir du contenu exact de
 `schema.sql` (racine du dépôt) — noms d'objets, comportement du trigger, texte
@@ -395,6 +399,117 @@ dernier export.
 
 ---
 
+## §8 — Lier un tournoi à Challonge et déclencher une synchronisation (F35)
+
+Cette section s'appuie sur RFC-007 (colonne `challonge_tournament_id`, tables
+de cache `challonge_participants_cache` / `challonge_matches_cache`) et
+RFC-008 (Edge Function `challonge-sync`). Depuis v3.0, `/ots` répond avec
+l'**adversaire actuel** du joueur (voir CLAUDE.md) — un tournoi **non lié** à
+Challonge ne peut pas résoudre d'adversaire (échec distinct F34, RFC-009).
+
+### 1. Lier le tournoi (Journey E, mise en place)
+
+Après avoir créé le tournoi comme d'habitude dans Studio (§1 ci-dessus),
+éditer sa ligne dans **Table Editor → tournaments** et renseigner
+`challonge_tournament_id` avec l'id ou le slug du tournoi Challonge
+correspondant. **Ceci est une édition manuelle dans Studio — aucune UI n'est
+construite pour cette étape** (hors périmètre, PRD §16).
+
+> ⚠️ **Tournois appartenant à une Community Challonge — utiliser l'id
+> numérique, jamais le slug d'URL (vérifié en conditions réelles,
+> 2026-07-20) :** si le tournoi a été créé sous une **Community** Challonge
+> (`challonge.com/communities/<permalink>`), la résolution par slug d'URL de
+> l'API v1 (celle utilisée par `challonge-sync`) répond `404` avec
+> `"Requested tournament not found"` pour le slug affiché dans la barre
+> d'adresse (ex. `challonge.com/<slug>`) — **même pour le compte qui
+> organise le tournoi** — car l'API v1 ne résout les slugs d'URL que dans
+> l'espace de noms **personnel** de la clé utilisée, pas dans celui d'une
+> Community. La même recherche par **id numérique** Challonge fonctionne
+> immédiatement. Pour l'obtenir :
+> ```
+> GET https://api.challonge.com/v2.1/tournaments.json?community_id=<permalink-de-la-community>
+> ```
+> (host v2.1, en-têtes `Authorization-Type: v1` / `Authorization: <clé API>` /
+> `Accept: application/json`), puis lire le champ **`id`** de l'entrée
+> correspondante (**pas** le slug `attributes.url`) et renseigner
+> `challonge_tournament_id` avec cet id numérique, sous forme de texte. Un
+> tournoi qui n'appartient **pas** à une Community fonctionne normalement
+> avec son slug ; cette mise en garde ne s'applique qu'en présence d'une
+> Community.
+
+### 2. Discipline des noms
+
+L'organisateur est **seul responsable** de garder les noms des participants
+Challonge **identiques** aux `players.ingame_name` du même tournoi (match
+exact après normalisation trim+lower, comme le reste du contrat de noms —
+§3 ci-dessus). Il n'existe **aucun outil de réconciliation** : une
+divergence de nom ne casse rien côté schéma, elle se traduit simplement par
+le résultat `opponent_no_ots` côté `/ots` (« adversaire trouvé, OTS pas
+encore enregistré ») la prochaine fois qu'un joueur consulte cet
+adversaire-là.
+
+### 3. Première population du cache
+
+Juste après avoir lié le tournoi (étape 1), **déclencher la synchronisation
+une première fois** (commande ci-dessous) — **avant** qu'un seul joueur
+n'utilise `/ots` pour ce tournoi. Sans ce premier déclenchement, les tables
+de cache sont vides et tout `/ots` échouera en `requester_not_found`.
+
+### 4. La commande de déclenchement
+
+Le secret est **toujours** remplacé par un placeholder dans ce document —
+**jamais** une valeur réelle committée (RULES §16) :
+
+```bash
+curl -X POST "https://<project-ref>.supabase.co/functions/v1/challonge-sync" \
+  -H "Content-Type: application/json" \
+  -H "x-challonge-sync-secret: <CHALLONGE_SYNC_SECRET — depuis vos notes, jamais dans ce fichier>" \
+  -d '{"tournament_id": <id Supabase du tournoi>}'
+```
+
+**Réponse de succès attendue** (HTTP 200) :
+```json
+{"status": "ok", "participants_synced": N, "matches_synced": M}
+```
+
+**Corps d'erreur possibles** (auto-diagnostic sans avoir à relire le code de
+l'Edge Function — RFC-008 §3.3) :
+
+| HTTP | Cause | Action |
+|------|-------|--------|
+| 401 | Secret manquant ou incorrect (en-tête `x-challonge-sync-secret`) | Vérifier la valeur dans vos notes / la config Supabase (`supabase secrets set`, voir `DEPLOYMENT.md`). |
+| 400 | `tournament_id` absent du corps, ou le tournoi Supabase visé n'a pas de `challonge_tournament_id` renseigné | Vérifier l'étape 1 ci-dessus a bien été faite pour ce tournoi. |
+| 404 | `challonge_tournament_id` renseigné mais introuvable côté Challonge | Revérifier l'id/slug — voir la mise en garde Community ci-dessus si le tournoi appartient à une Community. |
+| 502 | Challonge injoignable/en erreur au moment de l'appel | Réessayer après quelques instants ; si ça persiste, vérifier le statut de l'API Challonge. |
+
+### 5. La discipline en régime permanent (Journey F, la règle qui porte toute la fraîcheur du cache)
+
+**C'est la règle la plus importante de cette section — pas une note en bas
+de page :**
+
+1. **Valider le tour dans Challonge d'abord** (marquer les scores / le
+   vainqueur de chaque match du tour).
+2. **Puis lancer la commande de déclenchement (étape 4)** — **avant** de
+   faire tout autre changement dans Challonge.
+
+Cet ordre est **tout le modèle de correction** de la fraîcheur du cache
+(PRD §19) : le cache Supabase ne reflète Challonge qu'au moment du dernier
+déclenchement — tant qu'il n'est pas relancé après une validation de tour,
+`/ots` continue de répondre avec les données du tour précédent (pas une
+erreur — juste un cache qui n'a pas encore été rafraîchi).
+
+### 6. Récupération en cas de déclenchement oublié
+
+Si l'on se rend compte qu'un déclenchement a été oublié après une
+validation de tour : **relancer la commande de l'étape 4 dès que c'est
+remarqué** — pas de procédure spéciale, un re-déclenchement est toujours
+sûr (upsert idempotent, RFC-008). L'avertissement de staleness (F36, voir
+CLAUDE.md / `bot.py::fetch_current_opponent`) est précisément ce qui fait
+remonter ce cas côté opérateur si l'oubli dépasse 48h — un simple `print()`
+serveur, jamais un blocage pour les joueurs.
+
+---
+
 ## Références
 
 - `schema.sql` (racine du dépôt) — source de vérité pour les noms d'objets,
@@ -404,16 +519,26 @@ dernier export.
 - `knowledge/PRD.md` — §5.2 (Backoffice Studio), §7 (Journey A & B), §8 (G2),
   §11.1 (décision verrouillée : application au niveau base de données).
 - `knowledge/FEATURES.md` — F7, F8, F9, F10 (RFC-002) ; F20, F22, F24-backup
-  (RFC-006).
+  (RFC-006) ; F35, F36 (RFC-010).
 - `.claude/RULES.md` — §2 (docs dans `knowledge/`), §4 (contrainte
   d'activation attendue, jamais "corrigée"), §5 (contrat comportemental),
   §7 (fail-soft à l'utilisateur, loud à l'opérateur), §10 (garder la
-  documentation synchronisée).
+  documentation synchronisée) ; §11–20 (addendum v3.0).
 - `knowledge/RFCs/RFC-001-Supabase-Schema.md` — schéma, contraintes, index,
   trigger.
 - `knowledge/RFCs/RFC-006-Reliability-And-Release.md` — complète ce runbook
   avec le pré-vol, la contingence, et la sauvegarde du roster.
+- `knowledge/RFCs/RFC-007-Challonge-Schema.md`,
+  `knowledge/RFCs/RFC-008-Challonge-Sync-Edge-Function.md`,
+  `knowledge/RFCs/RFC-009-OTS-Opponent-Resolution.md`,
+  `knowledge/RFCs/RFC-010-Runbook-Staleness-Release.md` — schéma Challonge,
+  Edge Function `challonge-sync`, résolution d'adversaire `/ots`, et §8
+  ci-dessus.
 - `knowledge/DEPLOYMENT.md` — déploiement VM OCI (systemd, `deploy.sh`,
-  `journalctl`) référencé par §6(a)/(b) ci-dessus.
-- `knowledge/E2E-CHECKLIST.md` — grille de release-gate exécutée avant
+  `journalctl`) référencé par §6(a)/(b) ci-dessus, et §12 (déploiement de
+  l'Edge Function `challonge-sync`, référencé par §8 ci-dessus).
+- `knowledge/E2E-CHECKLIST.md` — grille de release-gate v2.0 exécutée avant
   déploiement (RFC-006, RULES §8).
+- `knowledge/E2E-CHECKLIST-v3.md` — grille de release-gate v3.0 (RFC-010,
+  RULES §18/§19) couvrant les sept issues fail-soft plus le happy path, et
+  le round-trip Journey F décrit à §8 ci-dessus.

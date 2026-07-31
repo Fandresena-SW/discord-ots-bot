@@ -1,13 +1,16 @@
 # DEPLOYMENT — Running the bot on a cloud VM (Oracle Cloud Free Tier)
 
-- **Status:** Production deployment documented (2026-07-18).
+- **Status:** Production deployment documented (2026-07-18); §12 (Challonge
+  sync Edge Function deploy) added by RFC-010.
 - **Host in use:** Oracle Cloud Infrastructure (OCI) **Always Free** compute
   instance, Ubuntu, region `eu-paris-1`.
 - **Process model:** the app is started as a **systemd service** on the VM
   (not the Heroku/Railway/Render-style `Procfile` worker described in
   `CLAUDE.md`'s "Run locally" section — the `Procfile` is kept in the repo as
   a portable process-type declaration in case a PaaS target is used later, but
-  the current production deployment is this self-managed VM).
+  the current production deployment is this self-managed VM). The v3.0
+  Challonge sync Edge Function (§12) is a **separate deployment target**
+  (Supabase itself, not the OCI VM) — see §12 for its own deploy path.
 
 This doc captures the exact steps used to stand up the bot on OCI, so a
 redeploy, a VM rebuild, or a move to a fresh instance doesn't have to
@@ -248,6 +251,78 @@ rediscovered from scratch on the next VM:
 
 ---
 
+## 12. Deploying the Challonge sync Edge Function
+
+The v3.0 addendum (RFC-007–010) adds the project's **first non-Python
+deployment target**: a Supabase Edge Function
+(`supabase/functions/challonge-sync/`, TypeScript/Deno) that the organizer
+triggers manually via `curl` (see `knowledge/RUNBOOK.md` §8) to refresh the
+Challonge participant/match cache. This is deployed to Supabase itself, not
+to the OCI VM — `bot.py` never talks to Challonge and needs no changes to
+support it (RULES §12).
+
+### Prerequisites
+
+- The [Supabase CLI](https://supabase.com/docs/guides/cli) installed locally
+  (or on whichever machine you deploy from — this does **not** need to be the
+  OCI VM).
+- The local repo linked to the Supabase project (once per clone/machine):
+  ```bash
+  supabase login
+  supabase link --project-ref <project-ref>
+  ```
+  (`<project-ref>` is the subdomain in the project's `SUPABASE_URL`, e.g.
+  `abcdefghijklmnop` from `https://abcdefghijklmnop.supabase.co`.)
+
+### Secrets provisioning (once per environment, never committed)
+
+The function needs two secrets, set directly on the Supabase project — never
+in a file tracked by git (mirrors the `.env`-on-the-server posture in §6
+above):
+
+```bash
+supabase secrets set CHALLONGE_API_KEY=<your Challonge API key>
+supabase secrets set CHALLONGE_SYNC_SECRET=<a secret you generate, used by the runbook's curl trigger>
+```
+
+`supabase/functions/challonge-sync/.env.example` documents the same two
+names for local reference; `.env.local` (used only by `supabase functions
+serve` for local dev) is git-ignored, same as the bot's own `.env`.
+
+### Deploy / redeploy
+
+```bash
+supabase functions deploy challonge-sync
+```
+
+Re-run this any time `supabase/functions/challonge-sync/*.ts` changes — there
+is no separate build step and no restart needed on the OCI side.
+
+### Verifying a deploy
+
+Run the trigger command documented in `knowledge/RUNBOOK.md` §8 against a
+known test tournament (e.g. the RFC-007 seed tournament) and confirm a `200`
+with the expected counts:
+
+```bash
+curl -X POST "https://<project-ref>.supabase.co/functions/v1/challonge-sync" \
+  -H "Content-Type: application/json" \
+  -H "x-challonge-sync-secret: <CHALLONGE_SYNC_SECRET>" \
+  -d '{"tournament_id": <id Supabase du tournoi de test>}'
+```
+
+Expect `{"status":"ok","participants_synced":N,"matches_synced":M}`. See
+`knowledge/RUNBOOK.md` §8 step 4 for the error-shape table (401/400/404/502)
+if it doesn't come back clean.
+
+### Troubleshooting log
+
+Real issues hit in production, appended here as they happen (not
+speculatively — mirrors §11 above's pattern). Empty as of this RFC's
+release; the first real incident goes here.
+
+---
+
 ## References
 
 - `CLAUDE.md` — "Run locally" section, config/env var reference.
@@ -260,3 +335,11 @@ rediscovered from scratch on the next VM:
 - `Procfile` — the portable `worker: python3 bot.py` process-type
   declaration, unused by the current systemd-based deployment but kept for a
   possible future PaaS target.
+- `knowledge/RUNBOOK.md` §8 — the organizer's Challonge linking + trigger
+  procedure, which references §12 above for the Edge Function's own deploy
+  path.
+- `knowledge/RFCs/RFC-008-Challonge-Sync-Edge-Function.md`,
+  `knowledge/RFCs/RFC-010-Runbook-Staleness-Release.md` — the Edge Function's
+  design and this deploy section's origin.
+- `supabase/functions/challonge-sync/` — the Edge Function source
+  (`index.ts`, `mapping.ts`, `.env.example`) referenced by §12 above.

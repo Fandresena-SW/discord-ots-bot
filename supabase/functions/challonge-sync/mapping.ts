@@ -5,6 +5,7 @@
 export interface ParticipantCacheRow {
   tournament_id: number;
   challonge_participant_id: number;
+  challonge_group_player_id: number | null;
   ingame_name: string;
 }
 
@@ -25,6 +26,14 @@ export interface MatchCacheRow {
 export interface RawChallongeParticipant {
   id: number;
   name: string;
+  // Present (non-empty) only when the tournament has Challonge group stages
+  // enabled. Group-stage matches' player1_id/player2_id reference THIS id,
+  // not the participant's top-level `id` — but Challonge keeps returning it
+  // even after the group stage ends, and the final bracket it generates
+  // then uses the top-level `id` instead. Both ids can be "live" join keys
+  // depending on which phase's matches are currently open — see
+  // mapParticipant, which keeps both rather than picking one.
+  group_player_ids?: number[] | null;
 }
 
 export interface RawChallongeMatch {
@@ -42,7 +51,15 @@ export function mapParticipant(
 ): ParticipantCacheRow {
   return {
     tournament_id: tournamentId,
+    // Stable top-level id: the upsert identity, and the join key for
+    // final-bracket (post-group-stage) matches.
     challonge_participant_id: raw.id,
+    // Group-stage-phase join key, when Challonge sends one. Bot-side
+    // opponent resolution must check a candidate match against EITHER this
+    // or challonge_participant_id (see bot.py's fetch_current_opponent) —
+    // picking only one silently breaks resolution for whichever phase
+    // doesn't use it.
+    challonge_group_player_id: raw.group_player_ids?.[0] ?? null,
     // Stored as-is: RFC-007's reused trim_ingame_name() trigger trims it on
     // write, so no separate trimming is needed here (RFC-008 §3.5).
     ingame_name: raw.name,

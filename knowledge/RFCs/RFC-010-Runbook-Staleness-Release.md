@@ -1,6 +1,7 @@
 # RFC-010 — Runbook, Staleness Backstop & Release
 
-- **Status:** 📝 Drafted (not yet implemented)
+- **Status:** 🚧 Code/docs implemented, **2026-07-20** — live E2E checklist
+  execution pending (see [§ Completion record](#completion-record))
 - **Implementation order:** 10 of 10 (v3.0, final) — depends on RFC-007,
   RFC-008, RFC-009 all being complete
 - **Complexity:** Medium
@@ -47,6 +48,23 @@ existing §0–§7 (RFC-002/RFC-006). Cover, in order:
    Studio (§1), set its `challonge_tournament_id` to the Challonge
    tournament's id/slug. Note this is a manual Studio edit — no UI is built
    for it (out of scope, PRD §16).
+   - **Community-owned tournaments — use the numeric ID, not the URL slug
+     (verified live, 2026-07-20):** if the tournament was created under a
+     Challonge **Community** (`challonge.com/communities/<permalink>`), the
+     v1 API's URL-slug lookup (what `challonge-sync` calls) 404s with
+     `"Requested tournament not found"` for the slug shown in the browser
+     address bar (e.g. `challonge.com/<slug>`) — **even for the account that
+     owns/organizes it** — because v1 resolves URL slugs only within the
+     requesting key's *personal* tournament namespace, not a community's.
+     The same lookup by Challonge's **numeric tournament id** succeeds
+     immediately. Get the numeric id via
+     `GET https://api.challonge.com/v2.1/tournaments.json?community_id=<community-permalink>`
+     (v2.1 host, headers `Authorization-Type: v1` / `Authorization: <API
+     key>` / `Accept: application/json`) and read the `id` field (**not**
+     the `attributes.url` slug) of the matching entry — then set
+     `challonge_tournament_id` to that numeric id as a string. A
+     non-community tournament's slug works fine as-is; this caveat only
+     applies once a Community is involved.
 2. **Name discipline:** the organizer is solely responsible for keeping
    Challonge participant names identical to `players.ingame_name` in the same
    tournament (exact, trim+lower-normalized match, no reconciliation
@@ -242,3 +260,62 @@ sanity check (unchanged from RFC-006's practice) to confirm the v2.0 pure-logic
 suite still passes untouched. Sign-off on the v3.0 E2E checklist is the
 go/no-go for this addendum's release, mirroring RFC-006's Completion-record
 pattern exactly.
+
+---
+
+## Completion record
+
+- **Status:** 🚧 Code/docs implemented — **2026-07-20**, implemented
+  directly (no `/rfc` sub-agent orchestration — same rationale as
+  RFC-007/008/009: this repo's `.claude/agents/*.md` and `/rfc` skill are
+  templated for an unrelated Flutter/Supabase project; tracked in
+  `RFCS.md`). **Live E2E execution (F37) is the one item this record leaves
+  open** — it requires a human operator driving Discord/Supabase
+  Studio/Challonge, which this implementation pass could not perform itself;
+  everything else in §2's acceptance criteria is done.
+- **Deliverables shipped:**
+  - `bot.py` (F36, the one code change): `_fetch_participant_id`'s `select`
+    extended to `challonge_participant_id,fetched_at` (reuses the existing
+    query, no extra round-trip); new pure `is_cache_stale(fetched_at, now)`
+    (§3.2/§7) and `_warn_if_stale(tournament_id, fetched_at_raw)`, called
+    right after a successful participant lookup in `fetch_current_opponent`.
+    The check is a side-effect `print()` only — it never changes the
+    returned status or blocks the player.
+  - `test_bot.py`: `IsCacheStaleTests` (5 cases) added — fresh, just-under-
+    48h, exactly-48h (boundary, not stale), just-over-48h, and a long-idle
+    (30-day) tournament — against the pure function directly, no network.
+  - `knowledge/RUNBOOK.md` §8 (F35): linking a tournament (including the
+    Community-owned-tournament numeric-id caveat, verified live 2026-07-20
+    and already present in this RFC's draft), name discipline, first
+    population, the trigger `curl` command with its error-shape table,
+    the Journey F steady-state discipline, and forgotten-trigger recovery.
+  - `knowledge/DEPLOYMENT.md` §12: Edge Function deploy prerequisites
+    (`supabase link`), secrets provisioning, `supabase functions deploy
+    challonge-sync`, deploy verification via the same `curl` trigger, and an
+    (empty, ready-to-append) troubleshooting log stub.
+  - `knowledge/E2E-CHECKLIST-v3.md` (F37, new file): 9 scenarios (happy path
+    both directions + all six fail-soft outcomes + the staleness log +
+    the Journey F trigger round-trip), mirroring `E2E-CHECKLIST.md`'s table
+    shape and sign-off block exactly, without touching that closed v2.0
+    record.
+  - `.claude/RULES.md` §9 bookkeeping (§3.5): found **already done** —
+    RFC-009's implementation commit (`15d7c63`) made this edit ahead of
+    schedule while it had the relevant context loaded; verified via `git show
+    15d7c63 -- .claude/RULES.md`, no further edit needed here.
+- **Verification performed:** `python -m unittest test_bot` — all 24 tests
+  pass (19 pre-existing + 5 new `IsCacheStaleTests`). `bot.py` parses cleanly
+  (`ast.parse`). **Not yet verified:** all 9 rows of
+  `knowledge/E2E-CHECKLIST-v3.md` remain `PENDING` — this requires a human
+  operator in the actual Discord guild, Supabase Studio, and (for scenario 9)
+  a real linked Challonge tournament, none of which this implementation pass
+  had access to. This is the same division of labor RFC-006 used (code/docs
+  by the assistant, live execution by the organizer) — see that RFC's own
+  Completion record for precedent.
+- **Flagged, not silently fixed:** `CLAUDE.md`'s "What this is"/"Key
+  mechanics" sections still describe the superseded v2.0 `/ots` contract
+  (last touched by RFC-006) and were never updated for RFC-009's behavior
+  change — out of this RFC's explicit file list (§7), so recorded as a new
+  tracked follow-up in `RFCS.md` instead of rewritten here.
+- **No deviations from the plan** — the implementation follows §3.1–3.5, §7
+  as drafted; the one deliberate scope boundary (live E2E execution) is
+  called out above rather than faked.

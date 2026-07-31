@@ -61,12 +61,28 @@ alter table tournaments
 -- §4) via the trim_ingame_name() trigger below. Refreshed by upsert (RFC-008
 -- owns the upsert statement), never plain append.
 create table if not exists challonge_participants_cache (
-  id                       bigint generated always as identity primary key,
-  tournament_id            bigint not null references tournaments(id) on delete cascade,
-  challonge_participant_id bigint not null,
-  ingame_name              text not null,
-  fetched_at               timestamptz not null default now()
+  id                        bigint generated always as identity primary key,
+  tournament_id             bigint not null references tournaments(id) on delete cascade,
+  -- Challonge's stable, top-level participant id (participants.json's `id`).
+  -- This is the identity used for the tournament_id+id upsert key below.
+  challonge_participant_id  bigint not null,
+  -- Nullable: only set for tournaments with Challonge group stages enabled
+  -- (participants.json's `group_player_ids[0]`). Group-stage matches key
+  -- their player1_id/player2_id off THIS value, not challonge_participant_id
+  -- -- a distinct id space that coexists with the top-level id even after
+  -- the group stage ends and a final bracket (which uses the top-level id)
+  -- is generated. Bot-side opponent resolution must match a candidate match
+  -- against EITHER column; storing only one silently breaks resolution for
+  -- whichever phase (group vs. final bracket) doesn't use it.
+  challonge_group_player_id bigint,
+  ingame_name               text not null,
+  fetched_at                timestamptz not null default now()
 );
+
+-- Idempotent add for environments that created this table before the
+-- group_player_ids gap above was discovered and fixed.
+alter table challonge_participants_cache
+  add column if not exists challonge_group_player_id bigint;
 
 -- RFC-007 (F28): locally-readable cache of a Challonge tournament's matches.
 -- `state` mirrors Challonge's own three values verbatim — this is the field
@@ -158,6 +174,14 @@ create unique index if not exists challonge_participants_cache_participant_idx
 
 create unique index if not exists challonge_participants_cache_name_idx
   on challonge_participants_cache (tournament_id, lower(ingame_name));
+
+-- Serves the bot's "match either id column" opponent-resolution lookups
+-- (see challonge_group_player_id's comment above). Partial + unique since
+-- it's null for non-group-stage tournaments and, when set, is as unique per
+-- tournament as challonge_participant_id itself.
+create unique index if not exists challonge_participants_cache_group_player_idx
+  on challonge_participants_cache (tournament_id, challonge_group_player_id)
+  where challonge_group_player_id is not null;
 
 -- RFC-007 (F28): unique per (tournament, Challonge match id) — the key
 -- RFC-008's upsert conflicts on.

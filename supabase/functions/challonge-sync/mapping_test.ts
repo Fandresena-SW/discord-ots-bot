@@ -5,13 +5,36 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { mapMatch, mapParticipant } from "./mapping.ts";
 
-Deno.test("mapParticipant maps id and name as-is under the resolved tournament", () => {
+Deno.test("mapParticipant maps id and name as-is, no group_player_id when absent", () => {
   const row = mapParticipant({ id: 1001, name: "giovlacouture" }, 42);
   assertEquals(row, {
     tournament_id: 42,
     challonge_participant_id: 1001,
+    challonge_group_player_id: null,
     ingame_name: "giovlacouture",
   });
+});
+
+Deno.test("mapParticipant maps group_player_id to null when group_player_ids is null", () => {
+  const row = mapParticipant({ id: 1001, name: "giovlacouture", group_player_ids: null }, 42);
+  assertEquals(row.challonge_participant_id, 1001);
+  assertEquals(row.challonge_group_player_id, null);
+});
+
+Deno.test("mapParticipant maps group_player_id to null when group_player_ids is empty", () => {
+  const row = mapParticipant({ id: 1001, name: "giovlacouture", group_player_ids: [] }, 42);
+  assertEquals(row.challonge_participant_id, 1001);
+  assertEquals(row.challonge_group_player_id, null);
+});
+
+Deno.test("mapParticipant keeps both the top-level id and group_player_ids[0]", () => {
+  // Real Challonge group-stage payload shape: matches.json's player1_id/
+  // player2_id reference group_player_ids[0] (46790479) while the final
+  // bracket generated once group stages end references the top-level id
+  // (299830841) instead — both must be kept, not one picked over the other.
+  const row = mapParticipant({ id: 299830841, name: "Asan", group_player_ids: [46790479] }, 42);
+  assertEquals(row.challonge_participant_id, 299830841);
+  assertEquals(row.challonge_group_player_id, 46790479);
 });
 
 Deno.test("mapMatch maps a normal open match with both sides fed in", () => {

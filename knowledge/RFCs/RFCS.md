@@ -44,7 +44,7 @@ depends on all lower-numbered RFCs (v2.0's included).
 | **007** ✅ | [Challonge Schema & Cache Tables](RFC-007-Challonge-Schema.md) | F26–F29 | Low–Medium | ✅ Complete |
 | **008** ✅ | [Challonge Sync Edge Function (manual trigger)](RFC-008-Challonge-Sync-Edge-Function.md) | F30–F31 | Medium | ✅ Complete |
 | **009** ✅ | [`/ots` Opponent-Resolution Refactor](RFC-009-OTS-Opponent-Resolution.md) | F32–F34 | High | ✅ Complete |
-| **010** | [Runbook, Staleness Backstop & Release](RFC-010-Runbook-Staleness-Release.md) | F35–F37 | Medium | 📝 Drafted |
+| **010** | [Runbook, Staleness Backstop & Release](RFC-010-Runbook-Staleness-Release.md) | F35–F37 | Medium | 🚧 Code/docs implemented — live E2E pending |
 
 ### Key v3.0 decisions locked (see FEATURES.md for full rationale)
 - Sync job is a **Supabase Edge Function** (TypeScript/Deno), not `pg_cron`/`pg_net`
@@ -172,6 +172,22 @@ depends on all lower-numbered RFCs (v2.0's included).
   trusted-as-is but render-hardened; improved not-found copy. (PRD §11 / RULES.)
 
 ## Tracked follow-ups
+
+- **`CLAUDE.md`'s "What this is" / "Key mechanics" sections still describe
+  the v2.0 `/ots` contract (arbitrary-name lookup) — owner: unassigned,
+  flagged during RFC-010.** RFC-009 changed `/ots`'s argument meaning to
+  "your own username → your current opponent's OTS" (an intentional,
+  confirmed one-time break, PRD §17/§24 item 4), but `CLAUDE.md` (last
+  touched by RFC-006, per `git log -- CLAUDE.md`) was never updated to match
+  — it still documents `fetch_active_player` as the live `/ots` read path
+  and doesn't mention `fetch_current_opponent`, the Challonge cache tables,
+  or the v3.0 fail-soft outcomes at all. RFC-010's own file list
+  (`knowledge/RUNBOOK.md`, `knowledge/DEPLOYMENT.md`,
+  `knowledge/E2E-CHECKLIST-v3.md`, `.claude/RULES.md`, `bot.py`) doesn't
+  include `CLAUDE.md`, so this RFC didn't fix it — but it should be updated
+  before/alongside this addendum's release so the top-level project doc
+  doesn't actively mislead the next reader (RULES §10, "keep the docs in
+  sync"). *(Surfaced during RFC-010, 2026-07-20 — not yet resolved.)*
 
 - **RLS enablement on `tournaments` / `players` — owner: RFC-003. ✅ Resolved
   2026-07-18.** RFC-001 creates the tables but deliberately scopes RLS *out* (the

@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 import aiohttp
 import discord
 from discord import app_commands
@@ -71,6 +72,10 @@ DISCORD_DESC_LIMIT = 4096
 # French truncation marker (user-facing text is always French). Appended
 # inside the fence so it renders as visible text, not after a broken fence.
 TRUNCATION_MARKER = "\n… (équipe tronquée)"
+
+# F36: age beyond which a Challonge cache row triggers an operator-only
+# staleness warning. Never gates resolution — see is_cache_stale().
+STALENESS_THRESHOLD = timedelta(hours=48)
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -214,15 +219,17 @@ async def _fetch_active_tournament_with_link(session: aiohttp.ClientSession) -> 
 
 
 async def _fetch_participant_id(session: aiohttp.ClientSession, tournament_id,
-                                 normalized_name: str) -> tuple[str, int | None]:
-    """Resolve `normalized_name`'s cached Challonge participant id within
-    `tournament_id`. Returns ("ok", id), ("requester_not_found", None), or
-    ("unavailable", None)."""
+                                 normalized_name: str) -> tuple[str, dict | None]:
+    """Resolve `normalized_name`'s cached Challonge participant id(s) within
+    `tournament_id`, alongside that cache row's `fetched_at` (F36 reuses this
+    query rather than making a second round-trip). Returns
+    ("ok", {"challonge_participant_id": ..., "challonge_group_player_id": ...|None,
+    "fetched_at": ...}), ("requester_not_found", None), or ("unavailable", None)."""
     url = f"{SUPABASE_URL}/rest/v1/challonge_participants_cache"
     params = {
         "tournament_id": f"eq.{tournament_id}",
         "ingame_name": f"ilike.{_escape_ilike(normalized_name)}",
-        "select": "challonge_participant_id",
+        "select": "challonge_participant_id,challonge_group_player_id,fetched_at",
         "limit": "1",
     }
     async with session.get(url, params=params) as resp:
@@ -230,19 +237,59 @@ async def _fetch_participant_id(session: aiohttp.ClientSession, tournament_id,
             print(f"fetch_current_opponent: participants query failed (status {resp.status})")
             return ("unavailable", None)
         rows = await resp.json()
-    return ("ok", rows[0]["challonge_participant_id"]) if rows else ("requester_not_found", None)
+    return ("ok", rows[0]) if rows else ("requester_not_found", None)
+
+
+def participant_candidate_ids(participant_row: dict) -> set[int]:
+    """A participant can be referenced in `challonge_matches_cache` by either
+    its stable top-level id or, for group-stage tournaments, a separate
+    `challonge_group_player_id` — Challonge keeps both live simultaneously
+    once a final bracket is generated after the group stage ends (the
+    bracket's matches use the top-level id; already-played group-stage
+    matches keep using the group id). Candidate set excludes None."""
+    return {
+        pid for pid in (
+            participant_row["challonge_participant_id"],
+            participant_row.get("challonge_group_player_id"),
+        ) if pid is not None
+    }
+
+
+def is_cache_stale(fetched_at: datetime, now: datetime) -> bool:
+    """Pure logic (RFC-010 §3.2, F36): True if a Challonge cache row's
+    `fetched_at` is more than 48h older than `now`. This never gates
+    resolution — it only decides whether to emit the operator-only staleness
+    warning in `_warn_if_stale`."""
+    return now - fetched_at > STALENESS_THRESHOLD
+
+
+def _warn_if_stale(tournament_id, fetched_at_raw: str) -> None:
+    """Log a server-side-only warning (never player-facing, never a branch)
+    if the participant cache row backing this request is stale (F36)."""
+    fetched_at = datetime.fromisoformat(fetched_at_raw)
+    if is_cache_stale(fetched_at, datetime.now(timezone.utc)):
+        print(
+            f"fetch_current_opponent: Challonge cache stale for tournament "
+            f"{tournament_id}: last refreshed {fetched_at_raw} (>48h ago)"
+        )
 
 
 async def _fetch_open_matches(session: aiohttp.ClientSession, tournament_id,
-                               participant_id: int) -> tuple[str, list[dict]]:
+                               own_ids: set[int]) -> tuple[str, list[dict]]:
     """Return the (at most one, DB-side highest-`round`-first) `open` match
-    rows involving `participant_id`. Returns ("ok", rows) or
+    rows involving any id in `own_ids` (group-stage id and/or top-level id —
+    see participant_candidate_ids). Returns ("ok", rows) or
     ("unavailable", None)."""
     url = f"{SUPABASE_URL}/rest/v1/challonge_matches_cache"
+    sides = ",".join(
+        f"player{side}_challonge_id.eq.{pid}"
+        for pid in own_ids
+        for side in (1, 2)
+    )
     params = {
         "tournament_id": f"eq.{tournament_id}",
         "state": "eq.open",
-        "or": f"(player1_challonge_id.eq.{participant_id},player2_challonge_id.eq.{participant_id})",
+        "or": f"({sides})",
         "select": "player1_challonge_id,player2_challonge_id,round",
         "order": "round.desc",
         "limit": "1",
@@ -257,12 +304,16 @@ async def _fetch_open_matches(session: aiohttp.ClientSession, tournament_id,
 
 async def _fetch_participant_name(session: aiohttp.ClientSession, tournament_id,
                                    participant_id: int) -> tuple[str, str | None]:
-    """Resolve a cached Challonge participant id back to its `ingame_name`.
-    Returns ("ok", name), ("not_found", None), or ("unavailable", None)."""
+    """Resolve a cached Challonge id — either a participant's top-level id or
+    its group-stage id — back to its `ingame_name`. Returns ("ok", name),
+    ("not_found", None), or ("unavailable", None)."""
     url = f"{SUPABASE_URL}/rest/v1/challonge_participants_cache"
     params = {
         "tournament_id": f"eq.{tournament_id}",
-        "challonge_participant_id": f"eq.{participant_id}",
+        "or": (
+            f"(challonge_participant_id.eq.{participant_id},"
+            f"challonge_group_player_id.eq.{participant_id})"
+        ),
         "select": "ingame_name",
         "limit": "1",
     }
@@ -274,8 +325,9 @@ async def _fetch_participant_name(session: aiohttp.ClientSession, tournament_id,
     return ("ok", rows[0]["ingame_name"]) if rows else ("not_found", None)
 
 
-def pick_opponent_id(own_id: int, matches: list[dict]) -> int | None:
-    """Pure logic (RFC-009 §7): given the caller's cached participant id and
+def pick_opponent_id(own_ids: set[int], matches: list[dict]) -> int | None:
+    """Pure logic (RFC-009 §7, extended for the group-stage/final-bracket
+    dual-id-space fix): given the caller's cached candidate id(s) and
     candidate `open` match rows (each with `player1_challonge_id`,
     `player2_challonge_id`, `round`), pick the opponent's id.
 
@@ -283,17 +335,17 @@ def pick_opponent_id(own_id: int, matches: list[dict]) -> int | None:
     - More than one row -> the highest `round` wins (defensive tie-break;
       the live query already sorts/limits this way, but this function is
       written to resolve it independently so it's unit-testable in isolation).
-    - Degenerate rows (own id not actually on either side, both sides equal
-      the caller, or the other side is null/bye) -> None, rather than
+    - Degenerate rows (no id in `own_ids` actually on either side, both sides
+      are in `own_ids`, or the other side is null/bye) -> None, rather than
       crashing or returning a nonsensical opponent.
     """
     if not matches:
         return None
     match = max(matches, key=lambda m: m.get("round") or 0)
     p1, p2 = match.get("player1_challonge_id"), match.get("player2_challonge_id")
-    if p1 == own_id and p2 is not None and p2 != own_id:
+    if p1 in own_ids and p2 is not None and p2 not in own_ids:
         return p2
-    if p2 == own_id and p1 is not None and p1 != own_id:
+    if p2 in own_ids and p1 is not None and p1 not in own_ids:
         return p1
     return None
 
@@ -328,15 +380,17 @@ async def fetch_current_opponent(normalized_own_name: str) -> tuple[str, dict | 
             if tournament["challonge_tournament_id"] is None:
                 return ("no_challonge_link", None)
 
-            status, own_id = await _fetch_participant_id(session, tournament_id, normalized_own_name)
+            status, participant = await _fetch_participant_id(session, tournament_id, normalized_own_name)
+            if status != "ok":
+                return (status, None)
+            own_ids = participant_candidate_ids(participant)
+            _warn_if_stale(tournament_id, participant["fetched_at"])
+
+            status, matches = await _fetch_open_matches(session, tournament_id, own_ids)
             if status != "ok":
                 return (status, None)
 
-            status, matches = await _fetch_open_matches(session, tournament_id, own_id)
-            if status != "ok":
-                return (status, None)
-
-            opponent_id = pick_opponent_id(own_id, matches)
+            opponent_id = pick_opponent_id(own_ids, matches)
             if opponent_id is None:
                 return ("no_current_match", None)
 
