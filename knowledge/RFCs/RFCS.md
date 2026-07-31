@@ -44,7 +44,20 @@ depends on all lower-numbered RFCs (v2.0's included).
 | **007** ✅ | [Challonge Schema & Cache Tables](RFC-007-Challonge-Schema.md) | F26–F29 | Low–Medium | ✅ Complete |
 | **008** ✅ | [Challonge Sync Edge Function (manual trigger)](RFC-008-Challonge-Sync-Edge-Function.md) | F30–F31 | Medium | ✅ Complete |
 | **009** ✅ | [`/ots` Opponent-Resolution Refactor](RFC-009-OTS-Opponent-Resolution.md) | F32–F34 | High | ✅ Complete |
-| **010** | [Runbook, Staleness Backstop & Release](RFC-010-Runbook-Staleness-Release.md) | F35–F37 | Medium | 🚧 Code/docs implemented — live E2E pending |
+| **010** ✅ | [Runbook, Staleness Backstop & Release](RFC-010-Runbook-Staleness-Release.md) | F35–F37 | Medium | ✅ Complete — live E2E 9/9 `PASS`, signed off 2026-07-31 |
+
+All four v3.0 RFCs are now ✅ complete — the Challonge integration release is
+shipped. The F37 release gate (`knowledge/E2E-CHECKLIST-v3.md`) was executed
+live by the organizer during a real event the week of 2026-07-20 and signed off
+**2026-07-31**: 9/9 `PASS`. See RFC-010's Completion record.
+
+One correction landed alongside this release, after RFC-009 shipped: Challonge
+keeps a participant's **group-stage id and top-level id live simultaneously**
+once a final bracket is generated (group matches key off `group_player_ids[0]`,
+bracket matches off the top-level `id`). Storing only one silently breaks
+opponent resolution for whichever phase doesn't use it. Both are now stored
+(`challonge_participants_cache.challonge_group_player_id`) and matched against
+(`participant_candidate_ids()` → `pick_opponent_id()`).
 
 ### Key v3.0 decisions locked (see FEATURES.md for full rationale)
 - Sync job is a **Supabase Edge Function** (TypeScript/Deno), not `pg_cron`/`pg_net`

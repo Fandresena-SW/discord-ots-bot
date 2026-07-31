@@ -1,7 +1,9 @@
 # RFC-010 — Runbook, Staleness Backstop & Release
 
-- **Status:** 🚧 Code/docs implemented, **2026-07-20** — live E2E checklist
-  execution pending (see [§ Completion record](#completion-record))
+- **Status:** ✅ **Complete** — code/docs implemented **2026-07-20**; live E2E
+  checklist (F37, 9/9 `PASS`) executed during a real event the week of
+  2026-07-20 and signed off **2026-07-31** (see
+  [§ Completion record](#completion-record))
 - **Implementation order:** 10 of 10 (v3.0, final) — depends on RFC-007,
   RFC-008, RFC-009 all being complete
 - **Complexity:** Medium
@@ -265,14 +267,15 @@ pattern exactly.
 
 ## Completion record
 
-- **Status:** 🚧 Code/docs implemented — **2026-07-20**, implemented
-  directly (no `/rfc` sub-agent orchestration — same rationale as
-  RFC-007/008/009: this repo's `.claude/agents/*.md` and `/rfc` skill are
-  templated for an unrelated Flutter/Supabase project; tracked in
-  `RFCS.md`). **Live E2E execution (F37) is the one item this record leaves
-  open** — it requires a human operator driving Discord/Supabase
-  Studio/Challonge, which this implementation pass could not perform itself;
-  everything else in §2's acceptance criteria is done.
+- **Status:** ✅ **Complete.** Code/docs implemented **2026-07-20** directly
+  (no `/rfc` sub-agent orchestration — same rationale as RFC-007/008/009:
+  this repo's `.claude/agents/*.md` and `/rfc` skill are templated for an
+  unrelated Flutter/Supabase project; tracked in `RFCS.md`). **Live E2E
+  execution (F37) — the one item this record originally left open — was
+  completed by the organizer during a real event the week of 2026-07-20 and
+  confirmed 2026-07-31: all 9 scenarios `PASS`** (see
+  `knowledge/E2E-CHECKLIST-v3.md` § Sign-off). §2's acceptance criteria are
+  now fully met and the v3.0 release gate is closed.
 - **Deliverables shipped:**
   - `bot.py` (F36, the one code change): `_fetch_participant_id`'s `select`
     extended to `challonge_participant_id,fetched_at` (reuses the existing
@@ -303,14 +306,15 @@ pattern exactly.
     schedule while it had the relevant context loaded; verified via `git show
     15d7c63 -- .claude/RULES.md`, no further edit needed here.
 - **Verification performed:** `python -m unittest test_bot` — all 24 tests
-  pass (19 pre-existing + 5 new `IsCacheStaleTests`). `bot.py` parses cleanly
-  (`ast.parse`). **Not yet verified:** all 9 rows of
-  `knowledge/E2E-CHECKLIST-v3.md` remain `PENDING` — this requires a human
-  operator in the actual Discord guild, Supabase Studio, and (for scenario 9)
-  a real linked Challonge tournament, none of which this implementation pass
-  had access to. This is the same division of labor RFC-006 used (code/docs
-  by the assistant, live execution by the organizer) — see that RFC's own
-  Completion record for precedent.
+  passed at implementation time (19 pre-existing + 5 new `IsCacheStaleTests`);
+  the suite now stands at 30 after the group-stage/final-bracket dual-id
+  correction landed alongside this RFC. `bot.py` parses cleanly
+  (`ast.parse`). **Live verification (completed 2026-07-31):** all 9 rows of
+  `knowledge/E2E-CHECKLIST-v3.md` are `PASS`, executed by the organizer in
+  the real guild/Supabase Studio/Challonge during an actual event the week of
+  2026-07-20. This followed the same division of labor RFC-006 used —
+  code/docs by the assistant, live execution by the organizer — see that
+  RFC's own Completion record for precedent.
 - **Flagged, not silently fixed:** `CLAUDE.md`'s "What this is"/"Key
   mechanics" sections still describe the superseded v2.0 `/ots` contract
   (last touched by RFC-006) and were never updated for RFC-009's behavior

@@ -389,11 +389,16 @@ failure** during a live tournament. These measures manage that risk:
 
 # v3.0 Addendum — Challonge Integration
 
-**Status:** 🚧 In design — RFC-007 (schema) and RFC-008 (sync Edge Function)
-✅ complete (2026-07-20); RFC-009–010 (`/ots` refactor, release) drafted but
-not yet implemented. See `knowledge/RFCs/RFCS.md` §"v3.0 — Challonge
-Integration" and `knowledge/FEATURES.md` §"v3.0 — Challonge Integration" for
-the RFC/feature breakdown this addendum is implemented through.
+**Status:** ✅ **Shipped 2026-07-31.** All four RFCs (007 schema, 008 sync Edge
+Function, 009 `/ots` refactor, 010 runbook/staleness/release) are complete, and
+the F37 release gate (`knowledge/E2E-CHECKLIST-v3.md`) passed 9/9 — executed
+live by the organizer during a real event the week of 2026-07-20 and signed off
+2026-07-31. See `knowledge/RFCs/RFCS.md` §"v3.0 — Challonge Integration" and
+`knowledge/FEATURES.md` §"v3.0 — Challonge Integration" for the RFC/feature
+breakdown this addendum was implemented through.
+
+The next release is drafted separately in `knowledge/PRD.v4.md` (ranking
+system) — a draft for discussion, not an approved plan.
 
 **Origin:** this addendum consolidates a chat-based change-management review
 (2026-07-20) that evaluated two options for adding live opponent-pairing
