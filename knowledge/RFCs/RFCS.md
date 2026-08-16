@@ -1,7 +1,10 @@
-# RFCS — OTS Bot Backoffice v2.0 (implementation roadmap)
+# RFCS — OTS Bot (implementation roadmap)
 
-Master index for the RFC set that delivers the Supabase-backed backoffice
-(`knowledge/PRD.md` v2, `knowledge/FEATURES.md`, `.claude/RULES.md`).
+Master index for every RFC in the project: v2.0's Supabase-backed backoffice
+(RFC-001–006), v3.0's Challonge integration (RFC-007–010, both shipped), and
+v4.0's ranking system and `/ots` identity binding (RFC-011–014, specified, not
+yet built). Sources: `knowledge/PRD.md` (v2.0 §1–13, v3.0 §14–26),
+`knowledge/PRD.v4.final.md` (v4.0), `knowledge/FEATURES.md`, `.claude/RULES.md`.
 
 > **Implementation is strictly sequential.** Each RFC is fully implementable only
 > after **all** lower-numbered RFCs are complete. There is no parallel work. Follow
@@ -122,6 +125,170 @@ opponent resolution for whichever phase doesn't use it. Both are now stored
 
 ---
 
+## v4.0 — Ranking System & `/ots` Identity Binding (RFC-011–014)
+
+Adds the **across-event dimension** (a persistent, season-scoped ranking) *and*
+closes a **team-sheet scouting leak** found during v3.0. Full context:
+`knowledge/PRD.v4.final.md` — the authoritative v4.0 spec, fully specified and
+decided 2026-07-31, with §31.7 the section to read first and §37 the
+locked-decision table. Strictly sequential, same as v2.0/v3.0 — each RFC
+depends on all lower-numbered RFCs.
+
+> ⚠️ **v4.0 is not an additive release.** `/ots` loses its argument and infers
+> the caller from a bound Discord profile, which makes the `players`↔Discord
+> binding an **authorization boundary**, not bookkeeping. Break-glass
+> (redeploying the previous `bot.py`) restores `/ots <name>` **and the scouting
+> leak with it** — accept that trade knowingly, not under pressure.
+
+| # | RFC | Features | Complexity | Status |
+|---|-----|----------|-----------|--------|
+| **011** | [Ranking Schema: Profiles, Seasons, Tiers & Frozen Results](RFC-011-Ranking-Schema.md) | F38–F50, F66, F67, + DDL halves of F60/F69/F70 | Medium | 📝 Draft |
+| **012** | [Points Engine & Sync Freeze](RFC-012-Points-Engine-And-Sync-Freeze.md) | F51–F57, F68, F72, F74 | High | 📝 Draft |
+| **013** | [Identity Binding, `/ots` Refactor & Debug Lookup](RFC-013-Identity-Binding-And-OTS-Refactor.md) | F58–F61, F69 (cmd), F71, F76, F77, F78 | High | 📝 Draft |
+| **014** | [Ranking Read Commands, Runbook & Release](RFC-014-Ranking-Read-Commands-And-Release.md) | F62–F65, F70, F73, F75 | Medium | 📝 Draft |
+
+**Nothing is blocked.** Every decision this design needs is in PRD §37, and
+Step 0 (the live Challonge `final_rank` verification, F54/F74) completed
+2026-07-31 — **do not re-derive those facts from first principles.**
+
+### Key v4.0 decisions locked (PRD §37 is authoritative)
+
+- **Points are a fixed placement table × a tier multiplier** — 100/70/50/30/15/5,
+  bucket edges at 1/2/3/5/9/17. Aligned to single-elim elimination rounds so
+  Challonge's tied ranks pay their members equally. **Not** a linear formula.
+- **Event weight is a `tournament_tiers` lookup**, and frozen results snapshot
+  the **resolved multiplier**, never `tier_id` — so repricing a tier never
+  restates history.
+- **The freeze lives in the Edge Function** (TypeScript), because that is where
+  `final_rank` arrives.
+- **Completion is never derived from cached matches alone** — a conditional
+  third Challonge call confirms it (F68). This **amends** the flat "exactly 2
+  calls" invariant in RULES §18 / PRD §21, which RFC-012 must reword.
+- **The default freeze is one-way**; corrections require an explicit
+  `refreeze: true` flag, recorded via `frozen_at` + `freeze_count`.
+- **The bracket, not the roster, decides who earned a result** —
+  `(tournament_id, challonge_participant_id)`, `player_id` nullable.
+- **Binding is organizer-only, one-time per person**, with forward auto-link by
+  normalized name. **No self-service claim command.**
+- **`/ots` takes no argument**; typed-name lookup survives only as
+  `/ots-organizer`, a separate organizer-gated command — **never** an
+  optional argument on `/ots` (an optional parameter puts the leak one faulty
+  conditional away from every player; a separate command fails closed).
+- **Authorization is a single `ORGANIZER_DISCORD_ID`** plus
+  `default_member_permissions`. No Discord role model.
+- **Season-points ties break on turnout first**, then best finish.
+- **Two new env vars**, both non-secret: `ORGANIZER_DISCORD_ID` (RFC-013) and
+  `RANKING_CHANNEL_ID` (RFC-014).
+- **Command and parameter names are English; every user-facing string stays
+  French** *(decided 2026-08-16, superseding the PRD's French working names)*.
+  The full surface: `/ots`, `/ots-organizer`, `/link-organizer`, `/unlink`,
+  `/standings`, `/profile`, with parameters `name`, `user`, `confirm_rebind`,
+  `confirm`, `tournament`. Same split RULES §3 already draws — internal
+  identifiers English, user-visible copy French — extended to the command
+  surface. `ots` is itself English (*open team sheet*).
+
+### Dependency table (v4.0 additions)
+
+| RFC | Depends on | Enables |
+|-----|-----------|---------|
+| 011 | 001–010 | 012, 013, 014 |
+| 012 | 011 | 013 (rows to backfill), 014 (rows to read) |
+| 013 | 011, 012 | 014 |
+| 014 | 011–013 | — (release) |
+
+### Dependency graph (textual, v4.0)
+
+```
+011 (schema: profiles, seasons, tiers, tournament_results, views,
+     auto-link trigger, RLS — ALL v4.0 DDL lands here)
+ └─► 012 (points.ts + the one-way freeze in the Edge Function;
+           conditional 3rd Challonge call gates completion)
+       └─► 013 (binding commands + /ots refactor + /ots-organizer;
+                 bot.py gains its first write path)
+             └─► 014 (/standings + /profile + runbook §9 + E2E-v4 + release)
+```
+
+### Feature → RFC coverage map (v4.0)
+
+| Feature | RFC | Feature | RFC |
+|---------|-----|---------|-----|
+| F38 `profiles` | 011 | F58 `/link-organizer` | 013 |
+| F39 `players.profile_id` | 011 | F59 binding conflict rules | 013 |
+| F40 one slot per person per event | 011 | F60 backfill (cmd) / auto-link (DDL) | 013 / 011 |
+| F41 `seasons` | 011 | F61 rebind by command | 013 |
+| F42 non-overlapping seasons | 011 | F62 `/standings` | 014 |
+| F43 `event_date` | 011 | F63 `/profile` | 014 |
+| F44 `season_id` | 011 | F64 per-tournament standings | 014 |
+| F45 `tournament_tiers` + `tier_id` | 011 | F65 ranking fail-soft | 014 |
+| F46 `completed_at` | 011 | F66 current-season concept | 011 |
+| F47 `tournament_results` | 011 | F67 snapshot every points input | 011 |
+| F48 `on delete restrict` | 011 | F68 conditional 3rd Challonge call | 012 |
+| F49 RLS on new tables + views | 011 | F69 erasure (DDL / cmd) | 011 / 013 |
+| F50 deliberate correction only | 011 | F70 leaderboard render (DDL / render) | 011 / 014 |
+| F51 placement table × multiplier | 012 | F71 binding not scoped to active event | 013 |
+| F52 pure `points.ts` | 012 | F72 two-mode freeze (`refreeze`) | 012 |
+| F53 `formula_version` | 012 | F73 `E2E-CHECKLIST-v4.md` | 014 |
+| F54 `final_rank` (ties + gaps) | 012 | F74 never filter on `active` | 012 |
+| F55 freeze requires `season_id` | 012 | F75 ranking channel restriction | 014 |
+| F56 default freeze is one-way | 012 | F76 `/ots` takes no argument | 013 |
+| F57 bracket entrants without a roster row | 012 | F77 organizer authorization | 013 |
+| | | F78 `/ots-organizer` | 013 |
+
+### Roadmap notes (v4.0)
+
+- **Critical path:** 011 → 012 → 013 is the backbone (schema → writer →
+  reader/commands), the same shape as v2.0's 001 → 003 → 005 and v3.0's
+  007 → 008 → 009. 014 is the closing documentation/verification/release RFC,
+  mirroring 006's and 010's role exactly.
+- **All v4.0 DDL lands in RFC-011**, including F60's auto-link trigger and
+  F70's `season_standings` view, using PRD §40's own `F69 (DDL)` convention.
+  RFC-012/013/014 own only behavior, and `schema.sql` is touched once this
+  release. *(A breakdown decision, recorded in RFC-011 §2.)*
+- **`bot.py` gains its first write path in RFC-013.** F58/F69 require
+  `POST`/`PATCH`/`DELETE`, so PRD §31.4's "`bot.py` has no write path at all"
+  stops being literally true. The locked decision to keep the freeze in
+  TypeScript still stands (that is where `final_rank` arrives, and the freeze is
+  a bulk write over third-party data), but the writes must go through **one
+  small seam**, the write-side twin of RULES §2's read seam. *(Flagged in
+  RFC-013 §3.1.)*
+- **Highest technical risk, in order:**
+  1. **F68** (RFC-012, the group-stage completion boundary) — in a group-stage
+     tournament the final bracket's matches don't exist in `matches.json` until
+     the group stage is finalized, so "all cached matches complete" fires while
+     half the event is unplayed. Under F56 that freeze is **one-way**. E2E
+     scenario 11 is the single most important row in the release gate.
+  2. **F76** (RFC-013) — the only player-facing contract change, with no
+     operational fallback: pairings can be announced by hand, team sheets cannot.
+  3. **F60** (RFC-013) — the one operation that can silently move another
+     player's results *and* another player's team-sheet access. Bounded to the
+     current season, filtered on `profile_id is null`, and mandatorily logged.
+  4. **F56/F72** (RFC-012) — two opposing write semantics in one Edge Function
+     (caches refresh constantly; results are write-once). That seam is where
+     bugs will live.
+  5. **F70** (RFC-014) — F14's char-budget failure mode, second occurrence. An
+     oversized embed description is rejected by Discord outright and presents
+     as the command silently failing.
+- **Two live-verified traps that must not be re-derived:** `final_rank` has
+  **ties and gaps** (`1,2,3,3,5,5,5,5,9…` — ranks 4, 6, 7, 8 don't exist), and
+  `participants[].active` is **false for every group-stage non-qualifier**, so
+  the natural "skip inactive participants" filter drops 43 % of the field —
+  precisely the players the participation floor exists to reward.
+- **RFC-011's seed fixtures de-risk RFC-012** the same way RFC-007's did
+  RFC-009: a season and a freezable test tournament exist before any live
+  Challonge account or real season is needed. Note that freezing the test
+  tournament makes it **undeletable** under F48 — deliberate, and exactly the
+  trap RUNBOOK §9 has to teach.
+- **Documents this release amends** (not just adds to): RULES §18 + PRD §21
+  (call count, RFC-012); `E2E-CHECKLIST-v3.md` (typed-`/ots` scenarios struck,
+  RFC-013); RULES §15 (the opponent-resolution entry point, RFC-013); RUNBOOK
+  (new §9) and DEPLOYMENT (two env vars, RFC-014); FEATURES F25(b), whose
+  "cross-tournament identities" Won't-have is deliberately **reopened**.
+- **Announcing the `/ots` change is a release requirement**, as v3.0's was —
+  the one item on this list that no RFC will remind anyone about. It is written
+  into RFC-014's deliverables for that reason.
+
+---
+
 ## Dependency table
 
 | RFC | Depends on (predecessors) | Enables (successors) |
@@ -220,16 +387,26 @@ opponent resolution for whichever phase doesn't use it. Both are now stored
   fixed during RFC-003 review, Round 2 — see RFC-003 § Completion record.)*
 
 - **`.claude/agents/{coder,planner,reviewer,explorer,tester}.md` and the
-  `/rfc` skill are templated for an unrelated Flutter/Supabase project
-  ("Atelier Hub") — owner: unassigned, flagged during RFC-007.** They
-  reference `flutter analyze`, `ccc search`, Dart/`freezed`/Riverpod
-  conventions, `.claude/CLAUDE.md`, `.claude/rules/`, and `knowledge/PRD.v4.md`
-  — none of which exist in this repo. RFC-007 was implemented directly
-  (no orchestration) to avoid the mismatch; RFC-008–010 will hit the same
-  issue unless these agent definitions are rewritten for this repo's actual
-  stack (Python/discord.py/Supabase SQL, `CLAUDE.md`, `.claude/RULES.md`,
-  `knowledge/PRD.md`) or the `/rfc` flow is skipped in favor of direct
-  implementation. *(Surfaced during RFC-007, 2026-07-20 — not yet resolved.)*
+  `/rfc` skill were templated for an unrelated Flutter/Supabase project
+  ("Atelier Hub") — flagged during RFC-007. ✅ Resolved 2026-08-16.** They
+  referenced `flutter analyze`, `build_runner`, `ccc search`,
+  Dart/`freezed`/Riverpod conventions, `supabase/migrations/`, routes/widgets,
+  `.claude/CLAUDE.md` and `.claude/rules/` — none of which exist here. RFC-007
+  was implemented directly (no orchestration) to avoid the mismatch, and
+  RFC-008–010 hit the same issue. **Rewritten 2026-08-16 for this repo's actual
+  stack** ahead of RFC-011: Python/discord.py + hand-applied `schema.sql`
+  (no migrations folder) + the Deno Edge Function; `python -m unittest test_bot`
+  (with the venv caveat) and `deno test` as the verification commands;
+  `CLAUDE.md` at the repo root and `.claude/RULES.md` as a single file; `grep`
+  and `Read` instead of `ccc`. The reviewer's dimensions were re-cut around
+  what actually breaks here (fail-soft/never-raise, render safety, schema
+  idempotency, RLS including `security_invoker` on views, untested pure logic).
+  Two structural changes beyond translation: the four `.claude/commands/rfc/*`
+  slash commands are now **thin wrappers pointing at the agent definitions**
+  rather than second copies of the same instructions, and the orchestrator
+  gained a **mandatory plan-approval gate** (Phase 0.5) so the flow matches the
+  two-phase approach every `implementation-prompt-RFC-*.md` already mandates.
+  *(Surfaced during RFC-007, 2026-07-20; resolved 2026-08-16.)*
 
 ## Structural decisions (low-risk defaults, flagged in the RFCs)
 

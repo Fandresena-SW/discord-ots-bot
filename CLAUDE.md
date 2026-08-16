@@ -26,10 +26,15 @@ reference doc there (do not scatter them across the repo root).
 - `knowledge/PRD.md` — the approved PRD. §14–§26 specify the current
   Challonge-backed behavior; §1–§13 specify the Supabase data layer it builds
   on.
-- `knowledge/PRD.v4.md` — **draft for discussion, nothing approved**: a ranking
-  system (persistent identity, seasons, frozen results, ranking points).
-  Numbering continues from `PRD.md` (§27+, F38+, G11+, Journey I+, RFC-011+).
-- `knowledge/FEATURES.md` — feature breakdown (MoSCoW), F1–F37.
+- `knowledge/PRD.v4.final.md` — **the authoritative v4.0 spec.** Specified and
+  decided 2026-07-31, not yet built: a ranking system plus a **breaking `/ots`
+  change** that closes a v3.0 team-sheet scouting leak. §31.7 is the section to
+  read first; §37 is the locked-decision table. Numbering continues from
+  `PRD.md` (§27–§41, F38–F78, G11–G17, Journey I–Q, RFC-011–014).
+- `knowledge/FEATURES.md` — feature breakdown (MoSCoW), F1–F78, in three
+  appended release sections (v2.0 F1–F25, v3.0 F26–F37, v4.0 F38–F78). Its
+  v4.0 section carries the supersession table for what v4.0 invalidates in the
+  sections above it.
 - `knowledge/RFCs/` — one file per RFC (001–010) plus `RFCS.md`, the master
   index with status, dependency graph, and tracked follow-ups. **`RFCS.md` is
   the fastest way to orient**; read it before the individual RFCs.
@@ -178,26 +183,74 @@ Do not relitigate these without an explicit decision to reopen them:
 - **No fallback to arbitrary-name lookup** when a tournament has no Challonge
   link — `/ots` hard-fails with a distinct message instead.
 
-## Planned direction (v4.0 — draft, nothing approved)
+## Planned direction (v4.0 — specified and decided, not yet built)
 
-A **ranking system**: persistent player identity, seasons, frozen tournament
-results, and ranking points. Drafted in `knowledge/PRD.v4.md` as a discussion
-document — no RFC has been written and no decision is locked.
+A **ranking system** *and* a security fix to `/ots`, specified in
+`knowledge/PRD.v4.final.md`. **Fully decided as of 2026-07-31** — no RFC has been
+written and no code exists, but nothing is open for exploration. Read **§31.7**
+(the `/ots` refactor) first, then **§37** (the locked-decision table). Reopening
+a §37 decision is a scope change, not a judgement call.
 
-The shape currently proposed: identity keyed on **Discord account** (claimed by
-the player via a `/link`-style command, not typed by an organizer); placement
-pulled from Challonge's `final_rank` and **frozen** when a tournament closes;
-points computed as `f(placement, weight)` at freeze time and **stored**, so
-later rule changes never restate history; standings summed per season.
+> ⚠️ **v4.0 is a breaking change to `/ots`, not an additive release.**
+> `/ots` loses its argument and infers the caller from a bound Discord profile.
+> This closes a real leak found during v3.0: because `/ots <name>` returns *that
+> person's opponent's* team sheet, anyone could walk the roster and scout the
+> whole field before being paired. Consequence: the identity binding is an
+> **authorization boundary**, not leaderboard bookkeeping — which is why binding
+> is organizer-only, with no self-service claim command.
+>
+> Typed-name lookup survives **only** as `/ots-organisateur <name>`, a separate
+> organizer-gated command for live debugging (F78). Two rules about it that a
+> future reader must not "simplify": it is **never** an optional argument on
+> `/ots` (an optional parameter puts the leak one faulty conditional away from
+> every player, whereas a separate command fails closed), and it is **never**
+> opened to non-organizers.
+
+The shape: identity keyed on **Discord account**, bound **once per human** by the
+organizer via `/link-organizer <name> <@user>` (later tournaments' roster rows
+auto-link by normalized name, so it is never repeated); placement pulled from
+Challonge's `final_rank` and **frozen** when a tournament closes; points computed
+at freeze time and **stored**, so later rule changes never restate history;
+standings summed per season.
+
+The decisions most likely to surprise a reader:
+
+- **Points are a fixed placement table × a tier multiplier** — 100 / 70 / 50 /
+  30 / 15 / 5. The bucket edges (1, 2, 3, 5, 9, 17) are deliberately aligned to
+  single-elim elimination rounds so Challonge's tied ranks pay their members
+  equally. **Do not "simplify" this to a linear formula** — it opens holes at
+  ranks 4 and 6–8. Verified against real data.
+- **Event weight is a `tournament_tiers` lookup**, not a numeric column, and
+  frozen results snapshot the *resolved multiplier* — so repricing a tier never
+  restates history.
+- **Season-points ties break on turnout first** (most events played), then best
+  finish. An event winner can rank below someone who attended more and won
+  nothing. Intentional.
+- **The freeze lives in the Edge Function**, in TypeScript, because `bot.py` has
+  no write path and giving it one is the bigger break.
+- **Two new env vars** — `RANKING_CHANNEL_ID` (ranking commands are
+  channel-restricted) and `ORGANIZER_DISCORD_ID` (authorizes
+  `/link-organizer`). Both broke the PRD's own "zero new env vars" promise; it
+  records the breaks rather than hiding them. Neither is a secret.
+- **An unbound player cannot use `/ots` at all.** That is intended, but it moves
+  the failure to round 1 of an event. Pre-flight must verify every roster row has
+  a `profile_id`, and `/link-organizer` must be runnable from a phone in
+  seconds — not a Studio procedure.
 
 Two things to know before touching it:
 
 - **This reopens cross-tournament player identities**, which both PRDs list as
   out of scope. That is intentional and is the core of the release — but it
   means those "out of scope" lists are no longer reliable on that one point.
-- **`PRD.v4.md` §33 lists ten unresolved questions**, including the points curve
-  itself. Do not implement from that document as if it were settled; several
-  answers change the schema.
+- **Two traps that live data confirmed, before anyone writes freeze code:**
+  `final_rank` has **ties and gaps** (`1,2,3,3,5,5,5,5,9…` — ranks 4, 6, 7, 8
+  simply don't exist), and `participants[].active` is **false for every
+  group-stage non-qualifier**, so filtering on it silently drops nearly half the
+  field. Also: deriving "tournament complete" from "all cached matches complete"
+  **fires at the group-stage boundary**, before the final bracket exists — F68
+  adds a conditional third Challonge call instead, which amends this repo's
+  "exactly 2 API calls" rule. See `PRD.v4.final.md` F54, F68, F74, and its §31.5
+  freeze algorithm.
 
 **Out of scope, and staying that way:** multiple simultaneously-active
 tournaments, a custom backoffice web app / multi-organizer roles, player

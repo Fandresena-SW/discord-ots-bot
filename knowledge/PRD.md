@@ -397,8 +397,12 @@ live by the organizer during a real event the week of 2026-07-20 and signed off
 `knowledge/FEATURES.md` §"v3.0 — Challonge Integration" for the RFC/feature
 breakdown this addendum was implemented through.
 
-The next release is drafted separately in `knowledge/PRD.v4.md` (ranking
-system) — a draft for discussion, not an approved plan.
+The next release is specified separately in `knowledge/PRD.v4.final.md`: a
+ranking system (persistent identity, seasons, frozen results, ranking points)
+**plus a breaking change to `/ots`** — the argument is removed and the caller is
+inferred from a bound Discord account, closing a team-sheet scouting leak
+inherent to §18.3's typed-name contract. Fully decided 2026-07-31, not yet built.
+**§17 and §24 item 4 below describe a contract v4.0 supersedes.**
 
 **Origin:** this addendum consolidates a chat-based change-management review
 (2026-07-20) that evaluated two options for adding live opponent-pairing
