@@ -3,7 +3,13 @@
 // RFC-004's pure-logic testing precedent (RULES §18) on the Deno side.
 
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { mapMatch, mapParticipant } from "./mapping.ts";
+import {
+  hasAmbiguousGroupPlayerIds,
+  mapMatch,
+  mapParticipant,
+  mapParticipantForFreeze,
+  normalizeName,
+} from "./mapping.ts";
 
 Deno.test("mapParticipant maps id and name as-is, no group_player_id when absent", () => {
   const row = mapParticipant({ id: 1001, name: "giovlacouture" }, 42);
@@ -70,4 +76,87 @@ Deno.test("mapMatch carries a non-null winner once a match is complete", () => {
   );
   assertEquals(row.state, "complete");
   assertEquals(row.winner_challonge_id, 1001);
+});
+
+// ---------------------------------------------------------------------------
+// Regression: mapParticipant's output shape is unchanged by F54/F74 (RFC-012)
+// ---------------------------------------------------------------------------
+
+Deno.test("mapParticipant regression: final_rank never leaks into ParticipantCacheRow", () => {
+  const row = mapParticipant(
+    { id: 1001, name: "giovlacouture", final_rank: 3, group_player_ids: [46790479] },
+    42,
+  );
+  assertEquals(row, {
+    tournament_id: 42,
+    challonge_participant_id: 1001,
+    challonge_group_player_id: 46790479,
+    ingame_name: "giovlacouture",
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapParticipantForFreeze (F54)
+// ---------------------------------------------------------------------------
+
+Deno.test("mapParticipantForFreeze carries final_rank through unchanged", () => {
+  const row = mapParticipantForFreeze({ id: 1001, name: "giovlacouture", final_rank: 3 });
+  assertEquals(row, { challongeParticipantId: 1001, name: "giovlacouture", finalRank: 3 });
+});
+
+Deno.test("mapParticipantForFreeze: final_rank absent maps to null", () => {
+  const row = mapParticipantForFreeze({ id: 1001, name: "giovlacouture" });
+  assertEquals(row.finalRank, null);
+});
+
+Deno.test("mapParticipantForFreeze: final_rank null stays null, not coerced to 0", () => {
+  const row = mapParticipantForFreeze({ id: 1001, name: "giovlacouture", final_rank: null });
+  assertEquals(row.finalRank, null);
+});
+
+Deno.test("mapParticipantForFreeze: final_rank 0 is preserved as 0, not treated as absent", () => {
+  const row = mapParticipantForFreeze({ id: 1001, name: "giovlacouture", final_rank: 0 });
+  assertEquals(row.finalRank, 0);
+});
+
+Deno.test("mapParticipantForFreeze: the tie/gap rank vector maps untouched", () => {
+  const ranks = [1, 2, 3, 3, 5, 5, 5, 5, 9, 10, 11, 12, 13, 14];
+  const mapped = ranks.map((r, i) =>
+    mapParticipantForFreeze({ id: i, name: `p${i}`, final_rank: r })
+  );
+  assertEquals(mapped.map((m) => m.finalRank), ranks);
+});
+
+// ---------------------------------------------------------------------------
+// hasAmbiguousGroupPlayerIds (F54)
+// ---------------------------------------------------------------------------
+
+Deno.test("hasAmbiguousGroupPlayerIds is false for undefined/null/empty/single-entry", () => {
+  assertEquals(hasAmbiguousGroupPlayerIds({ id: 1, name: "a" }), false);
+  assertEquals(hasAmbiguousGroupPlayerIds({ id: 1, name: "a", group_player_ids: null }), false);
+  assertEquals(hasAmbiguousGroupPlayerIds({ id: 1, name: "a", group_player_ids: [] }), false);
+  assertEquals(hasAmbiguousGroupPlayerIds({ id: 1, name: "a", group_player_ids: [46790479] }), false);
+});
+
+Deno.test("hasAmbiguousGroupPlayerIds is true for a length > 1 array, and mapParticipant still maps element 0", () => {
+  const raw = { id: 1, name: "a", group_player_ids: [111, 222] };
+  assertEquals(hasAmbiguousGroupPlayerIds(raw), true);
+  const row = mapParticipant(raw, 42);
+  assertEquals(row.challonge_group_player_id, 111);
+});
+
+// ---------------------------------------------------------------------------
+// normalizeName (F57 — trim-then-lower parity with bot.py's normalize_name)
+// ---------------------------------------------------------------------------
+
+Deno.test("normalizeName trims and lowercases", () => {
+  assertEquals(normalizeName("  Zou  "), "zou");
+});
+
+Deno.test("normalizeName leaves an already-normalized name unchanged", () => {
+  assertEquals(normalizeName("giovlacouture"), "giovlacouture");
+});
+
+Deno.test("normalizeName lowercases a mixed-case accented name", () => {
+  assertEquals(normalizeName("  Éowyn  "), "éowyn");
 });

@@ -485,6 +485,12 @@ curl -X POST "https://<project-ref>.supabase.co/functions/v1/challonge-sync" \
 {"status": "ok", "participants_synced": N, "matches_synced": M}
 ```
 
+Depuis RFC-012, la réponse porte en plus un objet `freeze` (résultat de la
+tentative de gel des résultats — sans effet sur le cache, qui se rafraîchit
+toujours normalement). Un champ optionnel `"refreeze": true` dans le corps de
+la requête force un recalcul d'un tournoi déjà gelé ; voir §9 (RFC-014) pour
+la procédure complète.
+
 **Corps d'erreur possibles** (auto-diagnostic sans avoir à relire le code de
 l'Edge Function — RFC-008 §3.3) :
 

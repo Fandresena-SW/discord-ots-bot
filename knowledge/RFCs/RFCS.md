@@ -143,7 +143,7 @@ depends on all lower-numbered RFCs.
 | # | RFC | Features | Complexity | Status |
 |---|-----|----------|-----------|--------|
 | **011** ✅ | [Ranking Schema: Profiles, Seasons, Tiers & Frozen Results](RFC-011-Ranking-Schema.md) | F38–F50, F66, F67, + DDL halves of F60/F69/F70 | Medium | ✅ Complete and **live** 2026-08-16 — schema-only; two-pass idempotency verified fresh, v2.0/v3.0-seeded, and against real synced data; F49's anon/service-key matrix proven through real PostgREST locally, then confirmed on the live project. Delivered by `db push` after the migration cutover, not hand-applied |
-| **012** | [Points Engine & Sync Freeze](RFC-012-Points-Engine-And-Sync-Freeze.md) | F51–F57, F68, F72, F74 | High | 📝 Draft |
+| **012** | [Points Engine & Sync Freeze](RFC-012-Points-Engine-And-Sync-Freeze.md) | F51–F57, F68, F72, F74 | High | 🔶 Code complete (Round 2) — `points.ts`/`mapping.ts`/`index.ts` shipped, 35/35 Deno tests green, local PostgREST shape check passed; acceptance criteria reconciled against actual verification state. **Deployment and the staged live group-stage walkthrough (§10.2, F68's real gate) remain outstanding by the user's explicit decision to defer them, not an oversight.** RFC-013 must not treat RFC-012's frozen `tournament_results` rows as trustworthy output until that walkthrough runs — see Completion record |
 | **013** | [Identity Binding, `/ots` Refactor & Debug Lookup](RFC-013-Identity-Binding-And-OTS-Refactor.md) | F58–F61, F69 (cmd), F71, F76, F77, F78 | High | 📝 Draft |
 | **014** | [Ranking Read Commands, Runbook & Release](RFC-014-Ranking-Read-Commands-And-Release.md) | F62–F65, F70, F73, F75 | Medium | 📝 Draft |
 

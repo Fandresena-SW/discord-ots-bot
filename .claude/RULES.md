@@ -415,8 +415,11 @@ F33) — up from v2.0's three. Each needs its **own** clear French message:
   the primary release gate for RFC-010, same as the v2.0 checklist was for
   RFC-006.
 - **Edge Function verification is manual/operational**, not a Python test
-  suite: confirm exactly 2 Challonge API calls per invocation, confirm re-runs
-  upsert without duplicating rows, confirm an invalid/missing
+  suite: confirm **2 Challonge API calls per invocation, plus a conditional
+  3rd** when the completion check is armed (every cached match reads
+  `complete`) — roughly once per event; a 7-round event goes from ~14 to ~15
+  calls against the 500/month cap (F68, RFC-012). Also confirm re-runs upsert
+  without duplicating rows, and confirm an invalid/missing
   `challonge_tournament_id` fails loudly.
 - Accessibility/responsive design: still **N/A** (§8 above holds — Discord
   embed output only).
@@ -539,6 +542,15 @@ asymmetry in mind.
   logged, auditable act — not something that happens quietly because someone
   re-ran the Edge Function. Do not wire any routine/scheduled path to rewrite
   `tournament_results`.
+- **Two opposing write semantics now live in one Edge Function (RFC-012).**
+  `challonge_participants_cache` / `challonge_matches_cache` refresh by upsert
+  and are designed to be re-run constantly; `tournament_results` is
+  write-once by default and must not be. Keep the freeze (`runFreeze()` in
+  `challonge-sync/index.ts`) textually separate from the cache-sync code, and
+  never share a helper that "just upserts" across both without the caller
+  stating which semantics it wants — `upsertRows` stays a mechanical POST
+  helper whose write-once guarantee, where it applies, is the caller's job to
+  enforce, not the helper's.
 
 ---
 

@@ -655,7 +655,7 @@ Priority: **P0** = must ship for this addendum; **P1** = strongly desired;
 
 | Metric | Target | How measured |
 |--------|--------|--------------|
-| Challonge API calls per event | Far under the 500/month free-tier cap | Rounds-per-event × 2, by construction of the manual-trigger design |
+| Challonge API calls per event | Far under the 500/month free-tier cap | Rounds-per-event × 2, **plus one conditional third call** on the trigger(s) where the completion check arms (F68, RFC-012 — amends this row's original flat ×2), by construction of the manual-trigger design |
 | `bot.py` new runtime dependencies | **0** | All Challonge I/O lives in the RFC-008 Edge Function |
 | Distinct fail-soft outcomes covered | **7** (§18.3) | RFC-010's E2E checklist, mirroring RFC-006's pattern |
 | Forgotten-refresh detection | Logged within 48h, never player-facing | RFC-010's staleness-warning verification |

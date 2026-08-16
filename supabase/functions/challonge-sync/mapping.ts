@@ -34,6 +34,70 @@ export interface RawChallongeParticipant {
   // depending on which phase's matches are currently open — see
   // mapParticipant, which keeps both rather than picking one.
   group_player_ids?: number[] | null;
+
+  // F54. Competition-style, WITH TIES AND GAPS: a real 14-player group-stage
+  // event returned 1, 2, 3, 3, 5, 5, 5, 5, 9, 10, 11, 12, 13, 14 — ranks 4,
+  // 6, 7 and 8 simply do not exist. NOTHING may treat this as a dense 1..N
+  // sequence, index into an array by it, or assume max(rank) === count.
+  // Non-null for every participant on a complete tournament, including those
+  // who never reached the final bracket. Verified live 2026-07-31 against
+  // Challonge tournament 18251698. Does NOT join ParticipantCacheRow —
+  // challonge_participants_cache has no final_rank column (RFC-011
+  // deliberately did not add one); the rank's durable home is
+  // tournament_results. See mapParticipantForFreeze below.
+  final_rank?: number | null;
+
+  // F74 — TRAP, at the same depth as the dual-id trap above. Challonge also
+  // sends `active`. It is DELIBERATELY NOT TYPED HERE so no one can filter
+  // on it by accident.
+  //
+  // `active` tracks STILL ADVANCING, not VALIDLY ENTERED. On that same live
+  // tournament it was false for all six group-stage non-qualifiers and true
+  // for the eight who advanced — so the natural-looking "skip inactive
+  // participants" filter silently drops 43% of the field, and precisely the
+  // lower-placed players the participation floor (F51) exists to reward.
+  // Freeze the WHOLE participant list. If a genuine DQ/forfeit signal is
+  // ever needed, it is not this field (PRD §37 known unknown — do not guess).
+}
+
+// F54. A freeze-time view of a participant: only what awardedPoints and the
+// tournament_results write need. Deliberately NOT merged into
+// ParticipantCacheRow (see the final_rank comment above).
+export interface FreezeParticipant {
+  challongeParticipantId: number;
+  name: string;
+  finalRank: number | null;
+}
+
+export function mapParticipantForFreeze(
+  raw: RawChallongeParticipant,
+): FreezeParticipant {
+  return {
+    challongeParticipantId: raw.id,
+    name: raw.name,
+    // `?? null` preserves a real 0 as 0 (left for findNullFinalRanks to
+    // reject) and never coerces a genuine null into 0.
+    finalRank: raw.final_rank ?? null,
+  };
+}
+
+// F54 defensive check. Every participant in the live verification had
+// exactly one group_player_ids entry, matching mapParticipant's
+// single-column shape — but that is not guaranteed. Pure predicate so the
+// caller (index.ts) can log a console.warn without putting I/O in this
+// module; mapParticipant itself keeps mapping element 0 unchanged either way.
+export function hasAmbiguousGroupPlayerIds(
+  raw: RawChallongeParticipant,
+): boolean {
+  return (raw.group_player_ids?.length ?? 0) > 1;
+}
+
+// Third implementation site of the same trim-then-lower contract as bot.py's
+// normalize_name (bot.py:85) — change one, change all three (RULES §4). Used
+// by the freeze's roster join (F57) to match a Challonge participant name
+// against players.ingame_name.
+export function normalizeName(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 export interface RawChallongeMatch {

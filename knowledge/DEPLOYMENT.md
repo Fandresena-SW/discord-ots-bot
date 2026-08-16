@@ -311,9 +311,11 @@ curl -X POST "https://<project-ref>.supabase.co/functions/v1/challonge-sync" \
   -d '{"tournament_id": <id Supabase du tournoi de test>}'
 ```
 
-Expect `{"status":"ok","participants_synced":N,"matches_synced":M}`. See
-`knowledge/RUNBOOK.md` §8 step 4 for the error-shape table (401/400/404/502)
-if it doesn't come back clean.
+Expect `{"status":"ok","participants_synced":N,"matches_synced":M,"freeze":{...}}`
+— since RFC-012 the response also carries a `freeze` object reporting the
+results-freeze attempt (does not affect the cache refresh, which still
+succeeds independently). See `knowledge/RUNBOOK.md` §8 step 4 for the
+error-shape table (401/400/404/502) if it doesn't come back clean.
 
 ### Troubleshooting log
 
