@@ -20,7 +20,7 @@ It is small enough to read almost entirely. Do not guess; open the files.
 |---|---|
 | `bot.py` | **The entire bot** (~510 lines). No packages, no modules. |
 | `test_bot.py` | stdlib `unittest`, 30 tests, pure-logic only. |
-| `schema.sql` | All Postgres DDL (~404 lines). Idempotent, hand-applied via Studio SQL editor. **There is no migrations folder.** |
+| `supabase/migrations/` | All Postgres DDL, as tracked migrations (since 2026-08-16). Each file individually idempotent. Root `schema.sql` is a retired redirect stub — do not apply it. Test fixtures live in `supabase/seed.sql`, never in a migration. |
 | `supabase/functions/challonge-sync/` | `index.ts` (HTTP handler), `mapping.ts` (pure mapping), `mapping_test.ts`. The only non-Python runtime. |
 | `knowledge/` | All docs: `PRD.md` (v2.0 §1–13, v3.0 §14–26), `PRD.v4.final.md` (v4.0), `FEATURES.md`, `RUNBOOK.md`, `DEPLOYMENT.md`, `E2E-CHECKLIST-v*.md`, `RFCs/`. |
 | `CLAUDE.md` (repo root) | Project guidance. **Not** `.claude/CLAUDE.md`. |
@@ -57,7 +57,7 @@ Report these as facts if relevant; do not editorialize.
   `challonge_participant_id` *or* `challonge_group_player_id`; both stay live
   once a final bracket exists. `participant_candidate_ids()` /
   `pick_opponent_id()` match the whole set.
-- **`schema.sql` is idempotent and hand-applied**; every object uses
+- **Each migration in `supabase/migrations/` is individually idempotent**; every object uses
   `if not exists` / `create or replace` / guarded inserts.
 - **`test_bot.py` cannot run on bare system Python** — `bot.py` imports
   `aiohttp`. It needs the venv where `requirements.txt` is installed.

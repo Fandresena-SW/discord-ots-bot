@@ -14,6 +14,12 @@ port = 54421
 port = 54422
 shadow_port = 54420
 
+[db.seed]
+# Test fixtures, local/dev only — `db push` never ships these to production.
+# Kept out of the migrations on purpose: see supabase/seed.sql's header.
+enabled = true
+sql_paths = ["./seed.sql"]
+
 [studio]
 port = 54423
 

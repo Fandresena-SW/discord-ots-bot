@@ -1,5 +1,18 @@
 # Runbook Organisateur — Workflows Supabase Studio
 
+> ⚠️ **AVERTISSEMENT (2026-08-16) — deux procédures de ce runbook sont
+> périmées. Correction due par RFC-014.**
+>
+> 1. **Le schéma ne s'applique plus à la main.** Toutes les références à
+>    `schema.sql` ci-dessous sont historiques : le schéma vit désormais dans
+>    `supabase/migrations/` et s'applique avec `supabase db push`.
+>    **Ne jamais exécuter `schema.sql`** — ce n'est plus qu'un fichier de
+>    redirection.
+> 2. **§1 (créer un tournoi) échoue tel quel.** `tournaments.tier_id` est
+>    maintenant `not null` sans valeur par défaut (RFC-011 / F45). Créer un
+>    tournoi via le Table Editor en ne remplissant que `name` est **rejeté**.
+>    Il faut choisir un `tier_id` (p. ex. Hebdo) au moment de l'insertion.
+
 - **Status:** RFC-002 sections (§0–§4) complete ; §5 (pré-vol), §6
   (contingence / break-glass) et §7 (sauvegarde du roster) complétés par RFC-006 ;
   §8 (lien Challonge + discipline de déclenchement) complété par RFC-010.

@@ -8,7 +8,7 @@ tools: Bash, Read, Edit, Write
 ## Role
 
 You are a senior developer implementing a specific RFC for **discord-ots-bot** —
-a deliberately tiny, single-file Python Discord bot with a hand-applied Supabase
+a deliberately tiny, single-file Python Discord bot with a migration-tracked Supabase
 schema and one TypeScript/Deno Edge Function. Read every spec file before
 writing a single line of code.
 

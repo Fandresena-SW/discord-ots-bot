@@ -63,10 +63,21 @@ reference doc there (do not scatter them across the repo root).
   (pure Challonge-JSON → cache-row mapping), `mapping_test.ts`. **`bot.py` never
   talks to Challonge** — it only ever reads Supabase. That boundary is a locked
   decision, not an accident.
-- `schema.sql` (repo root) — the full Supabase DDL, idempotent and applied by
-  hand in the Studio SQL editor: `tournaments`, `players`,
-  `challonge_participants_cache`, `challonge_matches_cache`, plus constraints,
-  indexes, triggers, RLS, seed fixtures, and a commented verification block.
+- **`supabase/migrations/`** — the schema, as tracked migrations. This replaced
+  the hand-applied root `schema.sql` on 2026-08-16; that file is now a stub that
+  redirects here, and **must not be applied**. Three migrations so far:
+  `..._baseline_v2_v3_schema.sql` (RFC-001/003/007 DDL, marked applied on
+  production via `migration repair` rather than executed),
+  `..._rfc011_ranking_schema.sql` (v4.0 ranking/identity DDL plus the
+  `tournament_tiers` reference rows), and `..._explicit_service_role_grants.sql`.
+  Every migration is still individually idempotent — that is what makes the
+  baseline-repair safe.
+- **`supabase/seed.sql`** — test fixtures only, applied by `supabase db reset`
+  on local/dev and **never** shipped by `db push`. Keeping fixtures inside the
+  applied schema is what caused the 2026-08-16 apply failure; do not move them
+  back. Reference data (the tiers) belongs in its migration, not here.
+- **`supabase/verification.sql`** — the commented invariant self-checks that
+  used to sit at the bottom of `schema.sql`. Not part of any apply path.
 - `test_bot.py` (repo root) — stdlib `unittest`, 30 tests covering the pure
   logic functions below.
 - `deploy.sh` — pull + restart the systemd service; run **on the production VM
@@ -272,8 +283,22 @@ non-French localization, and content validation of `team_text`.
   a distinct French message. New failure modes get new statuses, not exceptions.
 - Do not hardcode or echo the real token anywhere; use env vars only.
 - Put notes/docs/planning files in **`knowledge/`** (see Docs & knowledge base).
-- `schema.sql` must stay **idempotent** — it is re-run by hand against live
-  environments, so use `if not exists` / `add column if not exists` / guarded
-  inserts.
+- **Schema changes are migrations now.** Add a new file under
+  `supabase/migrations/`; never edit an already-applied one, and never resurrect
+  the root `schema.sql`. Apply with `supabase db reset` (local, rebuilds from
+  zero and runs `seed.sql`) or `supabase db push` (production, migrations only).
+- **Keep each migration individually idempotent** anyway — `if not exists` /
+  `add column if not exists` / guarded inserts. The ledger already prevents
+  re-runs; idempotency is what lets a migration be marked applied on an
+  environment that already has its objects, which is how production was
+  baselined.
+- **Never put test fixtures in a migration.** Reference data (e.g.
+  `tournament_tiers`) belongs in the migration that needs it; test data goes in
+  `supabase/seed.sql` and never reaches production.
+- **Grant explicitly.** The schema must not rely on Supabase's platform-default
+  privileges — a current CLI grants no `SELECT` on `public`, so an implicitly-
+  granted schema rebuilds into a database the bot cannot read (HTTP 403 with RLS
+  and the service key both correct). `service_role` gets DML; `anon` and
+  `authenticated` get nothing.
 - When a release ships, update the status in **all four** places that track it:
   the RFC's own Completion record, `RFCS.md`, `PRD.md`, and this file.

@@ -431,3 +431,47 @@ Step 0 (the live Challonge `final_rank` verification, F54/F74) completed
 
 Each is a minimal, reversible choice; if the maintainer prefers otherwise it's a
 trivial move noted in the relevant RFC.
+
+---
+
+## Schema delivery moved to migrations (2026-08-16)
+
+**A locked decision was reopened and replaced, with explicit approval.** The
+hand-applied, idempotent root `schema.sql` — the contract since RFC-001 — is
+retired. The schema now lives in `supabase/migrations/` and is applied with
+`supabase db push` (production) or `supabase db reset` (local, which also runs
+`supabase/seed.sql`). `schema.sql` is a redirect stub and **must not be
+applied**. Recorded in `.claude/RULES.md` §25 and `CLAUDE.md`.
+
+**Timing:** done immediately after RFC-011 was verified and *before* it reached
+production, so RFC-011's DDL became the first migration ever pushed rather than
+the last thing pasted into the SQL editor.
+
+**What forced it.** Applying RFC-011 to a database holding real synced Challonge
+data aborted under `ON_ERROR_STOP=1` at RFC-007's participant seed: its
+placeholder ids collided with synced rows on `lower(ingame_name)`, a conflict
+its `on conflict` target did not cover, and the apply died **before creating a
+single v4.0 object**. Three prior verification passes missed it because a
+container seeded only from `schema.sql` can never reproduce the collision. The
+root cause was test fixtures living inside the applied schema — which the split
+now prevents structurally.
+
+**Two further defects surfaced during the cutover, both pre-existing:**
+
+1. **The schema never granted anything**, relying on a Supabase platform default
+   that no longer holds. A current CLI provisions `public` with no `SELECT` for
+   the PostgREST roles, so rebuilding from the schema produced a database
+   returning HTTP 403 to the bot's service key while RLS and the key were both
+   correct. Production predates the change and still carries the old implicit
+   grants, so it was only ever *accidentally* working. Fixed by
+   `..._explicit_service_role_grants.sql`: `service_role` gets DML and sequence
+   usage, `anon`/`authenticated` get nothing, explicitly.
+2. **Fixtures could not survive the reordering.** Under the monolith the
+   tournament fixture ran *before* the v4.0 block added the not-null `tier_id`;
+   with migrations all DDL precedes all seed, so the fixture had to supply
+   `tier_id` — the same trap that makes RUNBOOK §1 stale.
+
+**Tracked follow-up — owner: RFC-014.** RUNBOOK carries a banner for both stale
+procedures (hand-applying the schema, and §1's tournament creation) but its nine
+`schema.sql` references still need rewriting. Historical RFCs, plans and
+implementation prompts deliberately keep their original wording.

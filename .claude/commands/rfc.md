@@ -10,7 +10,7 @@ From `$ARGUMENTS`:
 
 The sub-agent definitions carry these, but hold them yourself too:
 
-- Stack: **Python 3 / discord.py** (`bot.py`, single file), **Supabase Postgres** (`schema.sql`, idempotent, hand-applied — **no migrations folder**), one **TypeScript/Deno Edge Function** (`supabase/functions/challonge-sync/`).
+- Stack: **Python 3 / discord.py** (`bot.py`, single file), **Supabase Postgres** (tracked migrations in `supabase/migrations/`, each individually idempotent; the root `schema.sql` is a retired stub and must not be applied; test fixtures live in `supabase/seed.sql`), one **TypeScript/Deno Edge Function** (`supabase/functions/challonge-sync/`).
 - Standards: `CLAUDE.md` at the **repo root** and `.claude/RULES.md` — a **single file**, not a `.claude/rules/` directory.
 - Product docs: `knowledge/PRD.md` (v2.0/v3.0), `knowledge/PRD.v4.final.md` (v4.0), `knowledge/FEATURES.md`, `knowledge/RFCs/RFCS.md`.
 - Verification: `python -m unittest test_bot` (**needs the venv** — `bot.py` imports `aiohttp`) and `deno test supabase/functions/challonge-sync/`. **No CI, no linter.**

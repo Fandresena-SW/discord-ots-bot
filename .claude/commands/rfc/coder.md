@@ -30,7 +30,7 @@ kept in one place so the command and the agent cannot drift apart.
 
 - `python -m unittest test_bot` **needs the venv** where `requirements.txt` is
   installed — `bot.py` imports `aiohttp`, so bare system Python fails on import.
-- `schema.sql` is **hand-applied and idempotent**; there is no migrations
+- Schema changes are **new files in `supabase/migrations/`**, each idempotent; the root `schema.sql` is retired. Historical note: there was once no migrations
   folder. If you touched it, actually apply it **twice** against a disposable
   `postgres:16-alpine` container rather than asserting idempotency.
 - Every user-facing string is **French**; every identifier, log line and column

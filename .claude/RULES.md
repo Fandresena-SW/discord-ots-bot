@@ -601,3 +601,47 @@ rules on purpose — do not "fix" either one into matching the other:
   Challonge and Supabase names identical" (PRD §36) now also governs *who
   receives whose team sheet*, not just opponent resolution. This is an
   accepted trust argument, not a gap to code around.
+
+
+## 25. Schema delivery: migrations, not a hand-applied file
+
+**This section reopens and replaces a locked decision.** §2's "no new
+folders/packages" and the repo-wide "`schema.sql` is idempotent and applied by
+hand in the Studio SQL editor" contract were deliberately overturned on
+**2026-08-16**, with explicit approval, immediately after RFC-011 was verified
+and before it reached production. The earlier rule is superseded, not bent —
+treat any surviving reference to hand-applying `schema.sql` (in older RFCs,
+plans, agent definitions or the RUNBOOK) as historical.
+
+- **The schema lives in `supabase/migrations/`.** Add a new timestamped file
+  for every change. Never edit a migration that has been applied anywhere, and
+  never re-create the root `schema.sql` — it is a redirect stub now.
+- **`supabase/` remains the one folder exception to §2.** It already was
+  (v3.0 Addendum §12, for the Edge Function); `migrations/`, `seed.sql` and
+  `verification.sql` are subfolders of that same exception, not a new one.
+- **Keep every migration individually idempotent** regardless of the ledger.
+  That property is what allowed production to be baselined with
+  `migration repair --status applied` instead of re-running v2.0/v3.0 DDL
+  against a live database.
+- **Test fixtures never go in a migration.** They live in `supabase/seed.sql`,
+  which `db reset` applies locally and `db push` never ships. Reference data —
+  data the DDL itself depends on, such as `tournament_tiers` backing the
+  not-null `tournaments.tier_id` — stays in its migration.
+
+  *Why this is a rule and not a preference:* fixtures inside the applied schema
+  meant every production apply replayed seed inserts against data that had
+  moved on since they were written. On 2026-08-16 the RFC-007 participant seed
+  collided with real synced Challonge rows on `lower(ingame_name)` and aborted
+  the apply under `ON_ERROR_STOP=1` **before a single v4.0 object was created**.
+  A container seeded only from the schema file can never reproduce that, which
+  is why it survived three separate verification passes.
+
+- **Never rely on platform-default privileges.** Grant explicitly. A current
+  Supabase CLI provisions `public` with no default `SELECT` for the PostgREST
+  roles, so a schema that assumes the old implicit grants rebuilds into a
+  database where the bot gets HTTP 403 while RLS and the service key are both
+  correct. `service_role` gets DML and sequence usage; `anon` and
+  `authenticated` get **nothing**, explicitly. This strengthens §6 rather than
+  relaxing it: deny-by-default is now enforced instead of inherited.
+- **RLS and grants are independent.** Enabling RLS does not grant anything, and
+  granting does not weaken RLS. Both are required; reason about them separately.
