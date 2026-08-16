@@ -4,69 +4,37 @@ description: Implement an RFC following the plan at .claude/rfc-plans/RFC-[N]-pl
 
 # RFC Coder
 
-The user has invoked `/rfc:coder <N> [round] [blocking issues]`. Extract the RFC number and optional round (default: 1). If the user pasted blocking issues, treat them as the list to fix.
+The user has invoked `/rfc:coder <N> [round] [blocking issues]`. Extract the RFC
+number and optional round (default: 1). If the user pasted blocking issues,
+treat them as the list to fix and address each one explicitly.
 
-You are a senior Flutter developer. Read every spec file before writing a single line of code.
+## Instructions
 
-## Pre-flight check
+Read and follow **`.claude/agents/coder.md`** — its Role, Inputs, Process,
+Verification commands, the 17 Non-negotiable Rules, and its
+`IMPLEMENTATION COMPLETE` output block. Ignore its frontmatter (model, tools).
+Execute yourself; do not spawn a sub-agent.
 
-Verify `.claude/rfc-plans/RFC-[N]-plan.md` exists. If it does not, stop and tell the user: "Plan not found — run `/rfc:planner [N]` first."
+That file is the single source of truth for how code is written in this repo —
+kept in one place so the command and the agent cannot drift apart.
 
-## Before writing code, read
+## Pre-flight
 
-1. `.claude/rfc-plans/RFC-[N]-plan.md` — the implementation blueprint; follow its sequencing exactly
-2. `knowledge/RFCs/RFC-[N]-*.md` — the full specification
-3. `knowledge/RFCs/implementation-prompt-RFC-[N].md` — acceptance criteria and done checklist
-4. `.claude/CLAUDE.md` and `.claude/rules/` — all project standards
-5. `knowledge/PRD.v4.md` — product requirements
-6. All existing source files relevant to this RFC (read them before touching them)
+1. Verify `.claude/rfc-plans/RFC-[N]-plan.md` exists. If it does not, stop and
+   tell the user: "Plan not found — run `/rfc:planner [N]` first."
+2. Verify the user has approved that plan. If this is Round 1 and there is no
+   sign of approval in the conversation, ask before writing code — the two-phase
+   approach is mandated by every `implementation-prompt-RFC-*.md` in this repo.
 
-Use `ccc search <concept>` to find existing implementations of similar patterns before writing new code (e.g. `ccc search "AsyncNotifier mutation"`, `ccc search "RLS policy insert"`, `ccc search "formatMGA currency display"`). If `ccc search` fails with an initialization error, run `ccc init && ccc index` from the project root first.
+## Reminders that catch people out here
 
-## Process
-
-1. **Understand** — read every file listed above; do not skip
-2. **Implement** — write Dart code, SQL migrations, Edge Functions (Deno TS) as required, following the plan's implementation order
-3. **Code-generate** — if any `freezed` or `riverpod_annotation` model was added or modified, run:
-   ```
-   dart run build_runner build --delete-conflicting-outputs
-   ```
-4. **Verify** — run `flutter analyze`; fix every warning and error before declaring done
-5. **Self-review** — check every rule below before writing the output block
-
-If blocking issues were provided, address each one explicitly and mark it resolved in the output.
-
-## Non-negotiable Rules
-
-1. **Sound null safety** — no `dynamic`, no `!` force-unwrap without a justification comment, no unwarranted `late`
-2. **Screen → Provider → Supabase** — widgets never call `Supabase.instance.client` directly
-3. **`AsyncNotifier` for server data** — call `ref.invalidate()` after every mutation
-4. **No optimistic updates** — wait for server confirmation before updating UI
-5. **RLS on every new table** — add a migration with policies; never bypass
-6. **Audit trigger on every writable table** — `log_audit()` trigger in the migration
-7. **4 mandatory UI states** on every async section: loading → error → empty → data
-8. **French** for all user-facing strings — zero English in the UI
-9. **`formatMGA()`** for every currency display — no inline formatting, no `double` for money
-10. **No `SELECT *`** — always name columns explicitly
-11. **Every new route reachable via UI** — navbar, button, card tap, or FAB; no orphan routes
-12. **Zero `print()`, `TODO`, or `dynamic`** in delivered code
-13. **Max 40 lines/method, 250 lines/file** — extract if longer
-
-## Output
-
-End with this exact block:
-
-```
-IMPLEMENTATION COMPLETE
-RFC: [number]
-Round: [1 | 2 | 3]
-flutter analyze: PASS | FAIL ([error count] errors, [warning count] warnings)
-build_runner: RAN | SKIPPED
-Files created: [path per line, or none]
-Files modified: [path per line, or none]
-Migrations created: [filename per line, or none]
-Edge Functions created: [name per line, or none]
-Blocking issues fixed: [numbered list matching input issues, or N/A]
-Remaining issues: [list, or none]
-Next step: /rfc:reviewer [N] [round]
-```
+- `python -m unittest test_bot` **needs the venv** where `requirements.txt` is
+  installed — `bot.py` imports `aiohttp`, so bare system Python fails on import.
+- `schema.sql` is **hand-applied and idempotent**; there is no migrations
+  folder. If you touched it, actually apply it **twice** against a disposable
+  `postgres:16-alpine` container rather than asserting idempotency.
+- Every user-facing string is **French**; every identifier, log line and column
+  is **English**.
+- **No command may raise.** New failure modes get new named statuses.
+- Stay inside the RFC's **Scope Limitation** — work belonging to a later RFC
+  goes in `Remaining issues`, not in the diff.

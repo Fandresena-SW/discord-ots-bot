@@ -1,114 +1,40 @@
 ---
-description: Write and run tests for an RFC implementation. Covers static analysis, unit tests, widget tests, integration tests (RLS), and an E2E checklist. Run after /rfc:reviewer passes.
+description: Write and run tests for an RFC implementation. Covers stdlib unittest for pure Python logic, Deno tests for the Edge Function, SQL verification statements, and a French E2E checklist. Run after /rfc:reviewer passes.
 ---
 
 # RFC Tester
 
 The user has invoked `/rfc:tester <N>`. Extract the RFC number.
 
-You are a Flutter QA engineer. Write practical, executable tests that give the team confidence in the implementation. Every test must be tied to a concrete acceptance criterion or business rule.
+## Instructions
 
-## Before writing tests, read
+Read and follow **`.claude/agents/tester.md`** — its Role, Inputs, the four Test
+Scope sections, its Process, and its exact `TEST REPORT` output block. Ignore its
+frontmatter (tools). Execute yourself; do not spawn a sub-agent.
 
-1. `knowledge/RFCs/RFC-[N]-*.md` — specification and acceptance criteria
-2. `knowledge/RFCs/implementation-prompt-RFC-[N].md` — done checklist
-3. `.claude/rules/testing.md` — coverage targets and test patterns
-4. All implementation files created or modified by this RFC
+That file is the single source of truth for how this repo tests — kept in one
+place so the command and the agent cannot drift apart.
 
-Use `ccc search <concept>` to find existing test patterns before writing new tests (e.g. `ccc search "unit test AsyncNotifier mock"`, `ccc search "RLS integration test ChefProd"`). If `ccc search` fails, run `ccc init && ccc index` first.
+## The philosophy, restated because it is easy to over-build
 
-## Process
+> **Test the pure logic exhaustively; verify everything else by hand.**
+> Network paths are kept thin around pure functions precisely so the pure
+> functions can carry the coverage.
 
-### 1. STATIC ANALYSIS
+Do **not** add a mocking framework, a fixtures directory, a `tests/` package,
+`pytest`, or any new dependency. Python tests append to the single root-level
+`test_bot.py` using stdlib `unittest`; Deno tests sit beside the code they
+cover.
 
-Run and report:
-```bash
-flutter analyze
-```
+## Reminders
 
-Search for forbidden patterns in `lib/`:
-```bash
-grep -rn "print(" lib/ | grep -v "debugPrint"
-grep -rn "TODO\|FIXME" lib/
-grep -rn ": dynamic" lib/
-```
-
-### 2. UNIT TESTS
-
-Write unit tests in `test/unit/` for:
-- Every new calculation function (`calculateMargin`, `formatMGA`, payroll helpers)
-- Each test must cover: happy path, zero values, boundary values, invalid inputs
-- Provider logic testable without a live Supabase connection
-
-File naming: `test/unit/[feature]_test.dart`
-
-Run: `flutter test test/unit/`
-
-### 3. WIDGET TESTS
-
-For each new screen in the RFC:
-- Verify loading state shows a `CircularProgressIndicator` or skeleton
-- Verify error state shows an error message in French
-- Verify empty state shows an appropriate empty message
-- Verify data state renders the expected widgets
-
-File naming: `test/unit/[feature]_screen_test.dart`
-
-Run: `flutter test test/unit/`
-
-### 4. INTEGRATION TESTS (RLS)
-
-Write integration tests in `test/integration/` verifying for each new table:
-- `ChefProd` can read all rows (if applicable)
-- `ChefDept` can only read own department rows (if applicable)
-- `DG` can read aggregate/summary views
-- Unauthorized INSERT/UPDATE/DELETE raises an RLS violation, not a silent empty result
-
-These tests connect to a local Supabase instance (`supabase start`). If no local instance is running, skip with a clear note.
-
-File naming: `test/integration/rls_[feature]_test.dart`
-
-### 5. E2E CHECKLIST (manual)
-
-For each user journey touched by this RFC, produce a step-by-step checklist:
-
-```
-ID: T-[RFC]-[NNN]
-Journey: [name from PRD §8]
-Account: [ChefProd | ChefDept | DG]
-Precondition: [DB state required]
-Steps:
-  1. [exact tap / fill / action]
-  2. ...
-Expected: [exact UI outcome]
-DB check: [optional SQL to verify DB state after]
-```
-
-## Output
-
-End with this exact block:
-
-```
-TEST REPORT
-RFC: [number]
-flutter analyze: PASS | FAIL
-Unit tests: [N passed] / [N total] | FAIL ([list failing tests])
-Widget tests: [N passed] / [N total] | FAIL ([list failing tests])
-Integration tests: [N passed] / [N total] | SKIPPED (no local Supabase) | FAIL
-Files created: [path per line]
-Coverage gaps: [untested scenarios worth noting, or none]
-E2E checklist: [N test cases] — see above
-```
-
-If all of the following are true:
-- `flutter analyze: PASS`
-- All unit and widget tests pass
-- No coverage gaps for calculation functions
-
-Then print:
-```
-RFC-[N] is COMPLETE. All gates passed.
-Recommended next step: open a PR from branch rfc-[N] into main.
-```
-
-Otherwise print which gates are still open.
+- `python -m unittest test_bot` **needs the venv** — `bot.py` imports `aiohttp`.
+  If import fails, report `BLOCKED (venv/import)`, not a test failure.
+- Schema invariants are verified by **commented statements in `schema.sql`'s
+  verification block**, executed against a disposable
+  `postgres:16-alpine` container — the RFC-001/007 precedent.
+- **RLS must be checked against PostgREST with the anon key**, not in the SQL
+  editor, which runs as a superuser role and proves nothing.
+- The E2E checklist is **French**, matches `knowledge/E2E-CHECKLIST-v3.md`'s
+  format, and — where the RFC has a release-gate section — matches its scenarios
+  one for one without renumbering or merging them.
