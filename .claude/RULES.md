@@ -474,3 +474,130 @@ idempotent under repeated triggers.
   Won't-have list) to note that F25(e) ("real-time pairings... deferred") has
   been picked up by v3.0 — so §9 doesn't contradict what the bot actually does.
   Do not make this edit prematurely, before RFC-009 actually ships.
+
+---
+
+# v4.0 Addendum — Ranking System & `/ots` Identity Binding
+
+Guardrails for RFC-011–014 (the ranking/identity series). Derived from
+`knowledge/PRD.v4.final.md` and `knowledge/FEATURES.md`'s v4.0 section
+(F38–F78). **Sections 1–20 above remain fully binding** — this addendum only
+adds or narrowly amends what v4.0 changes. Same locked-decision posture: treat
+these as binding unless the PRD v4.0 spec is formally changed.
+
+> **v4.0 prime directive:** everything in this addendum lands in the existing
+> `schema.sql` and (in later RFCs) `bot.py`. No new file, folder, module, or
+> Python dependency is introduced by v4.0, and none is warranted — the same
+> "tiny single-file bot" ethos from the top of this document still governs
+> `bot.py`; only `schema.sql` (RFC-011) and the Edge Function (RFC-012's
+> freeze) gain new surface, and both are documented exceptions already granted
+> above, not new ones.
+
+---
+
+## 21. Durable data (v4.0)
+
+`profiles` and `tournament_results` are the project's **first non-disposable**
+data. Contrast this directly with §14 above: the Challonge cache tables can be
+fully re-derived from Challonge at any time via a re-trigger, but a lost season
+of standings, or a lost cross-tournament identity, cannot be reconstructed
+from anywhere. Treat any future change touching these two tables with that
+asymmetry in mind.
+
+- **F48's `on delete restrict`** on `tournament_results.tournament_id` (and
+  `.season_id`, and `tournaments.tier_id`) breaks `schema.sql`'s otherwise
+  uniform `on delete cascade` pattern, on purpose. Do not soften it to make a
+  test-tournament cleanup, a Studio "just delete it" impulse, or any other
+  operational convenience easier — a roster typo is recoverable; a deleted
+  season of frozen results is not. If a delete needs to succeed, the results
+  must be purged first, deliberately, by someone who has read what that means
+  (RUNBOOK §9, RFC-014).
+- **`profiles.discord_user_id` is the first genuinely personal data** this
+  project stores. The erasure path (F69, `on delete set null` on both
+  `profile_id` FKs) must stay possible by construction — never add a
+  cascading or restricting FK from `profiles` that would block a profile
+  delete, and never make erasure require anything beyond `delete from
+  profiles where id = ...`.
+
+---
+
+## 22. Frozen history
+
+- **Snapshot the resolved value, never the lookup key.**
+  `tournament_results.multiplier` stores the *resolved numeric* tier
+  multiplier at freeze time, never `tier_id`. Tiers are shared, mutable rows —
+  repricing "Majeur" from 3.0 to 2.5 must never silently restate every Majeur
+  result ever frozen. Any future frozen-result column that derives from a
+  shared lookup table must follow this same snapshot rule.
+- **Standings sum over `tournament_results.season_id`, never over a join to
+  `tournaments.season_id`.** Editing a tournament's season assignment after a
+  freeze must never relocate a frozen result into a different season's
+  standings. The frozen row's own `season_id` is the only source of truth for
+  which season it counts toward.
+- **Corrections are deliberate only, never a side effect of a routine sync.**
+  `frozen_at` / `freeze_count` (F50) exist so a re-freeze (F72) is an explicit,
+  logged, auditable act — not something that happens quietly because someone
+  re-ran the Edge Function. Do not wire any routine/scheduled path to rewrite
+  `tournament_results`.
+
+---
+
+## 23. Security posture extended to views
+
+RLS deny-by-default (§6 above) now extends to **views**, which need an extra
+step views don't get for free:
+
+- Every new view over RLS-protected data declares `with (security_invoker =
+  on)` **and** is explicitly `revoke`d from `anon`/`authenticated`. Both halves
+  are required — the revoke alone would not survive a future re-grant, and
+  `security_invoker` alone leaves the view *readable* (but empty) to `anon`.
+- **The failure mode this guards against:** a view owned by a superuser role,
+  without `security_invoker`, happily serves `anon` exactly the rows RLS
+  denies on the base table — silently reopening the hole RFC-003 closed. This
+  is the single easiest mistake to make in any RFC that adds a view.
+- **Verification must go through PostgREST with the anon key, never the SQL
+  editor.** The SQL editor runs as a superuser role and is unaffected by RLS
+  either way — a check that "passes" there proves nothing. A local container
+  test must simulate this with `set role anon` after granting the PostgREST
+  roles select on the object, not just check for "permission denied" from a
+  missing grant.
+- A `404`/`PGRST205` from PostgREST on a brand-new table or view is a **stale
+  schema cache**, not a passing RLS result — reload it
+  (`notify pgrst, 'reload schema';`) before concluding anything.
+
+---
+
+## 24. Auto-link rules
+
+The forward auto-link trigger (F60) that binds a new `players` roster row to
+an existing `profiles` row by normalized name follows two opposite-sounding
+rules on purpose — do not "fix" either one into matching the other:
+
+- **Fail-CLOSED on ambiguity.** If a normalized name matches more than one
+  distinct bound profile, the trigger leaves `profile_id` null and logs a
+  `WARNING` — it never guesses. Binding is an **authorization boundary** (a
+  bound profile is who receives that team's `/ots` result), so a wrong guess
+  here is a real access mistake, not a cosmetic one.
+- **Fail-OPEN on the F40 slot conflict.** If the resolved profile already
+  holds a roster slot in that tournament, the trigger leaves `profile_id` null
+  and logs a `WARNING`, but the organizer's Studio **insert still succeeds**.
+  Rejecting the insert instead would cost the whole roster row over a linking
+  detail; a null link only costs one follow-up `/link-organizer`. Do not
+  invert this into a hard rejection.
+- **`before insert` only, never `or update`.** Renaming an existing roster row
+  must never silently re-point it at a different person's profile — that is
+  exactly the "silently moves team-sheet access" hazard this feature's
+  logging exists to catch. Re-pointing is `/link-organizer`'s job (RFC-013),
+  a deliberate act, not a side effect of an edit.
+- **Trigger-name ordering is load-bearing.** Postgres fires same-event
+  triggers in name order, so `players_autolink_profile` runs before
+  `players_trim_ingame_name`. That the resolver still gets the right answer
+  despite seeing an untrimmed `NEW.ingame_name` is only true because the
+  resolver applies `btrim`/`lower` itself — do not rename either trigger
+  without re-checking the relative order and re-running the untrimmed-name
+  verification check.
+- **The schema now depends on the organizer's own name discipline and cannot
+  enforce it.** Auto-link keys on the normalized `ingame_name`, so "keep
+  Challonge and Supabase names identical" (PRD §36) now also governs *who
+  receives whose team sheet*, not just opponent resolution. This is an
+  accepted trust argument, not a gap to code around.

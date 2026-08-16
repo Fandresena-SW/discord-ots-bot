@@ -142,7 +142,7 @@ depends on all lower-numbered RFCs.
 
 | # | RFC | Features | Complexity | Status |
 |---|-----|----------|-----------|--------|
-| **011** | [Ranking Schema: Profiles, Seasons, Tiers & Frozen Results](RFC-011-Ranking-Schema.md) | F38–F50, F66, F67, + DDL halves of F60/F69/F70 | Medium | 📝 Draft |
+| **011** ✅ | [Ranking Schema: Profiles, Seasons, Tiers & Frozen Results](RFC-011-Ranking-Schema.md) | F38–F50, F66, F67, + DDL halves of F60/F69/F70 | Medium | ✅ Complete — schema-only, verified in a disposable local Postgres container (two-pass idempotency, fresh and v2.0/v3.0-seeded); F49's PostgREST anon/service-key half is operator-owed against live Supabase |
 | **012** | [Points Engine & Sync Freeze](RFC-012-Points-Engine-And-Sync-Freeze.md) | F51–F57, F68, F72, F74 | High | 📝 Draft |
 | **013** | [Identity Binding, `/ots` Refactor & Debug Lookup](RFC-013-Identity-Binding-And-OTS-Refactor.md) | F58–F61, F69 (cmd), F71, F76, F77, F78 | High | 📝 Draft |
 | **014** | [Ranking Read Commands, Runbook & Release](RFC-014-Ranking-Read-Commands-And-Release.md) | F62–F65, F70, F73, F75 | Medium | 📝 Draft |
@@ -407,6 +407,18 @@ Step 0 (the live Challonge `final_rank` verification, F54/F74) completed
   gained a **mandatory plan-approval gate** (Phase 0.5) so the flow matches the
   two-phase approach every `implementation-prompt-RFC-*.md` already mandates.
   *(Surfaced during RFC-007, 2026-07-20; resolved 2026-08-16.)*
+
+- **`RUNBOOK.md` §1's "create a tournament via Studio's Table Editor" procedure
+  is now stale — owner: RFC-014. Open, tracked here pending that RFC.**
+  RFC-011 made `tournaments.tier_id` `not null` with no default, but §1 still
+  documents filling only `name` and leaving every other field at default; doing
+  that against the live schema now fails with a not-null violation on
+  `tier_id`. Until RFC-014 rewrites §1, any organizer creating a tournament
+  through the Table Editor must manually pick a `tier_id` (e.g. Hebdo) at
+  insert time. RFC-011 could not fix this itself — `RUNBOOK.md` belongs to
+  RFC-014 — so it is disclosed here and in RFC-011's own Completion record
+  instead. *(Surfaced during RFC-011 review, Round 2, 2026-08-16; owed to
+  RFC-014.)*
 
 ## Structural decisions (low-risk defaults, flagged in the RFCs)
 

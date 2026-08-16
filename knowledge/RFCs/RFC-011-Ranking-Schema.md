@@ -730,6 +730,264 @@ fixture, so RFC-012/013/014 have data before any live season exists:
 
 ## Completion record
 
-*(to be filled in on completion — status, deliverables shipped, verification
-performed, deviations, and any tracked follow-ups, per the RFC-001–010
-convention)*
+- **Status:** ✅ Complete (2 review rounds) — schema-only, no bot/Edge Function
+  code touched. Implemented directly against the approved planner blueprint
+  (`.claude/rfc-plans/RFC-011-plan.md`).
+- **Deliverables shipped:** one self-contained section `8. v4.0 — RANKING &
+  IDENTITY (RFC-011)` appended to `schema.sql` (existing "7. VERIFICATION
+  BLOCK" renumbered to "9."), plus a header-block paragraph documenting the
+  addition and the ordering/cascade exceptions:
+  - **Tables:** `profiles` (F38), `seasons` (F41, with inline
+    `seasons_bounds_ck`), `tournament_tiers` (F45, seeded Hebdo 1.0 / Mensuel
+    2.0 / Majeur 3.0), `tournament_results` (F47/F48/F50/F67).
+  - **Columns:** `players.profile_id` (F39, `on delete set null`);
+    `tournaments.event_date` (F43), `.season_id` (F44, `on delete set null`),
+    `.tier_id` (F45, not-null via add → backfill → constrain),
+    `.completed_at` (F46).
+  - **Indexes/constraints:** `profiles_discord_user_id_idx`,
+    `players_tournament_profile_idx` (F40), `seasons_no_overlap_excl` (F42, a
+    `pg_constraint`-guarded exclusion constraint), `tournament_tiers_name_idx`,
+    `tournament_results_participant_idx`, `_season_idx`, `_profile_idx`,
+    `_season_name_idx`.
+  - **Functions/trigger:** `resolve_profile_for_ingame_name()`,
+    `autolink_player_profile()`, `players_autolink_profile` (F60 DDL half,
+    fail-closed on ambiguity, fail-open on the F40 slot conflict, `before
+    insert` only).
+  - **Views:** `current_season` (F66), `season_standings` (F70 DDL half), both
+    `with (security_invoker = on)` and both revoked from `anon`/`authenticated`
+    (F49).
+  - **RLS:** enabled, no policies, on all four new tables (F49).
+  - **Seed:** one wide test season (`RFC-011 Test Season`), and the existing
+    `RFC-001 Test Tournament` fixture amended in place with `event_date` and
+    that season — left `completed_at` null and un-frozen for RFC-012.
+  - **Verification block:** the RFC-007 "delete the test tournament" cleanup
+    step amended in place with the F48 warning and a purge-first alternative;
+    nine new commented checks appended (idempotency, F42, F40, F48, F67, F60's
+    four paths + no-re-link + untrimmed insert, F69, F70, F49).
+  - **`.claude/RULES.md`:** v4.0 addendum added, §21 (durable data / F48's
+    non-cascade / personal-data erasure), §22 (frozen history: snapshot the
+    resolved value, sum on `tournament_results.season_id`, deliberate-only
+    corrections), §23 (`security_invoker` + revoke on every new view, verified
+    through PostgREST only), §24 (auto-link's fail-closed/fail-open split,
+    `before insert` only, trigger-name ordering, the name-discipline
+    dependency).
+  - `knowledge/RFCs/RFCS.md` line 145 flipped from `📝 Draft` to
+    `✅ Complete`, with the verification summary inline.
+  - `knowledge/FEATURES.md` F25(b) and its Supersession table were already
+    annotated in place before this RFC started — verified, not re-annotated,
+    per the plan.
+- **Verification performed (real, not simulated):**
+  - **Idempotency, fresh database:** `postgres:16-alpine` in Docker, with a
+    container-only prelude creating `anon`/`authenticated` roles (never added
+    to `schema.sql` itself — see the R6 note on the `revoke` statement).
+    `psql -v ON_ERROR_STOP=1 -f schema.sql` applied **twice**: exit 0 both
+    times; the second run showed `INSERT 0 0` / `UPDATE 0` for every seed and
+    the `tier_id` backfill, and `NOTICE ... already exists, skipping` for every
+    table/index/column — no duplicate objects, no duplicate tier rows.
+  - **Idempotency, database already carrying v2.0/v3.0 data:** a second,
+    separate container. Applied `git show HEAD:schema.sql` (the pre-RFC-011
+    file) first, producing the standard v2.0/v3.0 seed (1 tournament, 3
+    players, Challonge cache fixtures) — then added two more hand-inserted
+    "historical" tournaments to more realistically exercise the backfill
+    against pre-existing production-like rows. Applied the **new**
+    `schema.sql` twice: pass 1 showed `UPDATE 3` for the `tier_id` backfill
+    (confirmed via `select name, tier_id from tournaments` — all three,
+    including both historical rows, got Hebdo); pass 2 showed `UPDATE 0`.
+    Post-pass-2 invariants: 3 tier rows, 0 null `tier_id`, 1 `RFC-011 Test
+    Season` row, 3 tournaments unchanged. Both containers removed after the
+    run.
+  - **F42:** same-boundary-day overlap (`...-06-30` then `2027-06-30-...`)
+    rejected with `ERROR: conflicting key value violates exclusion constraint
+    "seasons_no_overlap_excl"`; the adjacent pair (`2027-07-01`) succeeded;
+    `select extname from pg_extension where extname = 'btree_gist'` returned 0
+    rows both before and after.
+  - **F40:** two roster rows sharing a `profile_id` in the same tournament →
+    `ERROR: duplicate key value violates unique constraint
+    "players_tournament_profile_idx"`; the same across two tournaments →
+    succeeded.
+  - **F48:** a fixture `tournament_results` row, then `delete from tournaments
+    where id = ...` → `ERROR: ... violates foreign key constraint
+    "tournament_results_tournament_id_fkey" on table "tournament_results"`,
+    exactly as documented.
+  - **Not separately re-verified in-container (noted for completeness, not
+    blocking):** `tournament_tiers.id`'s own restrict behavior — that a tier
+    referenced by any `tournaments.tier_id` row cannot be deleted — was not
+    exercised by a dedicated `delete from tournament_tiers ...` check. It rests
+    on the identical `on delete restrict` pattern proven above for
+    `tournament_results`'s two FKs, which is standard, well-understood
+    Postgres FK semantics, but it was confirmed by construction/analogy rather
+    than by an independent run.
+  - **F67:** an insert omitting `multiplier` → `ERROR: null value in column
+    "multiplier" ... violates not-null constraint`.
+  - **F60, all four paths, live-tested with six scratch tournaments (A–F) to
+    avoid incidental `players_tournament_name_idx`/`players_tournament_profile_idx`
+    collisions:** clean auto-link (no warning, correct `profile_id`);
+    ambiguous name → `WARNING: auto-link: ingame_name ... matches 2 distinct
+    profiles - leaving unlinked`, insert still succeeded with `profile_id`
+    null; F40 slot conflict → `WARNING: auto-link: profile ... already holds a
+    roster slot in tournament ... - leaving ... unlinked`, insert still
+    succeeded; explicit `profile_id` supplied → never overwritten. Plus: an
+    `update` to `ingame_name` on the still-unlinked row confirmed no re-link
+    (trigger is `before insert` only); an insert of `'  rfc011f60cleanB  '`
+    auto-linked correctly despite the untrimmed input and the stored name came
+    back trimmed by the later-firing `players_trim_ingame_name` trigger.
+  - **F69:** deleted a `profiles` row referenced by both a `players` row and a
+    `tournament_results` row → succeeded; both FKs went null;
+    `tournament_results.ingame_name` (the frozen snapshot) survived unchanged.
+  - **F70:** hand-computed fixture (one bound player across two events at 100
+    points each, one unbound player across one event at 50 points) — the
+    view returned exactly `total_points 200 / events_played 2 / best_rank 1`
+    for the bound row and `50 / 1 / 2` for the unbound row.
+  - **F41/F50:** `ends_on < starts_on` → rejected by `seasons_bounds_ck`;
+    `freeze_count` defaulted to `1` and `frozen_at` was non-null on insert.
+  - **F49, the anon/`security_invoker` mechanism (§7.2 of the plan), including
+    the required control case:** with the PostgREST roles granted `select` on
+    all tables (simulating Supabase's automatic default-privilege grant, since
+    a plain container-harness `grant ... to anon` predates the RFC-011
+    objects), `set role anon` reads of `profiles`, `seasons`,
+    `tournament_tiers`, `tournament_results`, `current_season` and
+    `season_standings` all returned **0 rows** — RLS (and, for the views,
+    `security_invoker`) doing the work, not a missing grant. **Control case:**
+    created a deliberate non-`security_invoker` copy of `current_season`
+    (`rfc011_control_no_invoker`), granted it to `anon`, and confirmed `anon`
+    **did** get back the real `RFC-011 Test Season` row through it — proving
+    the mechanism rather than assuming it. The control view was dropped
+    immediately after and never entered `schema.sql`. Re-running the same
+    read against `current_season` itself (the shipped, `security_invoker`
+    view) returned 0 rows under identical grants.
+  - **Regression:** `python -m unittest test_bot` — 30/30 `PASS`, unmodified.
+    `deno test supabase/functions/challonge-sync/mapping_test.ts` — 7/7
+    `PASS`, unmodified. `git status` showed only `schema.sql` modified
+    (`.claude/RULES.md` and the two doc files were the only other intended
+    touches) — no accidental edit reached `bot.py`, `test_bot.py`, or
+    `supabase/functions/`.
+- **Round 1 → Round 2 fix:** reviewer found that `tournaments.tier_id` being
+  `not null` with no default (see the bug note directly below) silently breaks
+  `RUNBOOK.md` §1's documented "create a tournament in Studio's Table Editor by
+  filling only `name`" procedure, and that this was disclosed nowhere — not in
+  this Completion record, not in the operator apply notes, not in the tracked
+  follow-ups. Fixed with documentation only, no DDL change (RFC-011 does not
+  own `RUNBOOK.md`): added operator apply note 8 above, extended the tracked
+  follow-ups below, and added a matching entry to `RFCS.md`'s own "Tracked
+  follow-ups" section so a future reader finds the gap regardless of which
+  file they start from. Also added, as a non-blocking completeness note, that
+  `tournament_tiers.id`'s FK-restrict behavior was proven by construction
+  against the identical `tournament_results` pattern rather than by a
+  dedicated in-container `delete` attempt (see the F48 verification entry
+  above).
+- **Bug found and fixed during verification (not in the RFC text, a coder
+  responsibility per the plan):** `tournaments.tier_id` is `not null` with no
+  default. The pre-existing F4c verification-block fixture
+  (`insert into tournaments (name, is_active) values (...)`) and this RFC's
+  own new verification fixtures (checks 3, 6, 8) all create fresh tournament
+  rows — every one of them now needs an explicit `tier_id` (looked up from
+  `tournament_tiers`) or the insert fails with a not-null violation. Fixed by
+  adding `tier_id` (selecting the Hebdo tier's id) to every such insert,
+  including the F4c fixture that predates RFC-011. Caught by actually running
+  the checks in the container, not by inspection.
+- **Deviations from the plan:** none. R6 was kept exactly as specified (the
+  plain `revoke` stays in `schema.sql`; the `anon`/`authenticated` roles are
+  created only in the container-harness prelude, with the one-line comment
+  above the `revoke` explaining why); no `pg_roles`-guarded `do $$` swap was
+  made.
+- **Operator apply notes (Tier 2 — steps 3–5 now discharged against a *local*
+  Supabase stack on 2026-08-16; steps 1, 2 and 6 remain owed against the live
+  project).** The plan assumed Tier 2 could not be run without the live
+  project. That turned out to be wrong: a full local Supabase stack (real
+  PostgREST + Kong, PG 17.6) was available, and the anon/service-key matrix ran
+  against it for real — see "Local Supabase verification" below. Applying to
+  live Supabase, and the in-guild `/ots` smoke test, are still genuinely owed.
+  1. Before applying, run `select version();` against the live Supabase
+     project to confirm PG ≥ 15 (required for `security_invoker`).
+  2. Apply the new `schema.sql` section via the Studio SQL editor, as always.
+     **This writes to every pre-existing tournament row**: the `tier_id`
+     backfill sets `tier_id = <Hebdo>` for every tournament that predates this
+     RFC, including historical/completed ones. This is harmless (those rows
+     have `season_id null` and can never freeze, F55) but it is a real `update`
+     against live data — confirmed the same behavior in-container against a
+     database carrying v2.0/v3.0 fixtures above.
+  3. Run `notify pgrst, 'reload schema';` so PostgREST picks up the four new
+     tables and two new views immediately — a `404`/`PGRST205` before this is
+     a stale cache, not a passing RLS check.
+  4. With the **anon** key (`apikey` + `Authorization: Bearer <anon>`), `GET`
+     each of `/rest/v1/profiles`, `/rest/v1/seasons`,
+     `/rest/v1/tournament_tiers`, `/rest/v1/tournament_results`,
+     `/rest/v1/current_season`, `/rest/v1/season_standings`
+     (`?select=*&limit=1`) → the four **tables** return HTTP 200 and an
+     **empty array**; the two **views** return **HTTP 401** with
+     `{"code":"42501","message":"permission denied for view ..."}`. Both are
+     passes. The views differ because `revoke all ... from anon` denies the
+     privilege outright, so PostgREST rejects before RLS is ever consulted —
+     a strictly stronger result than an empty array, not a failure. *(An
+     earlier draft of this note said "empty array for all six"; verified
+     against a real PostgREST instance on 2026-08-16 and corrected.)*
+  5. With `SUPABASE_SERVICE_KEY`, the same six requests → expect HTTP 200 with
+     rows (or `[]` where genuinely empty) — confirms the bot's own read path
+     is unaffected.
+  6. Run a `/ots` smoke test in the guild after applying, confirming the v3.0
+     read path (unchanged by this RFC) still works.
+  7. This is the local container's proxy for step 4/5 above — treat it as
+     evidence the mechanism works, not as a substitute for actually running it
+     against the live PostgREST endpoint.
+  8. **`RUNBOOK.md` §1 is now stale and this RFC cannot fix it (that file
+     belongs to RFC-014).** §1 documents creating a tournament in Studio's
+     Table Editor by filling only `name` and leaving everything else at
+     default. As of this schema, `tournaments.tier_id` is `not null` with no
+     default, so that procedure will fail with a not-null violation the
+     moment this schema is live. **Until RFC-014 rewrites `RUNBOOK.md` §1,
+     any organizer creating a new tournament via the Table Editor must
+     manually select a `tier_id` (e.g. Hebdo) at insert time**, or the insert
+     is rejected. Also tracked in `RFCS.md`'s "Tracked follow-ups" section so
+     it surfaces independently of this file.
+- **Local Supabase verification (2026-08-16).** Run against a live local
+  Supabase stack (real PostgREST + Kong, PG 17.6) whose database already held
+  v2.0/v3.0 data *and* real synced Challonge rows — a materially better target
+  than a bare container, and the run that caught the seed bug below.
+  - **Idempotency:** first apply wrote `INSERT 0 3` (tiers), `UPDATE 2` (the
+    `tier_id` backfill hitting exactly the two pre-existing tournaments),
+    `INSERT 0 1` (test season), `UPDATE 1` (test-tournament amendment). Second
+    and third applies: every write `0`, `tournament_tiers` still 3 rows, zero
+    null `tier_id`. Final apply exited 0 under `ON_ERROR_STOP=1`.
+  - **F49 matrix, anon key:** `profiles`, `seasons`, `tournament_tiers`,
+    `tournament_results` → `200 []`; `current_season`, `season_standings` →
+    `401 permission denied for view`. No `404`/`PGRST205` (cache reloaded
+    first), so these are genuine results rather than cache artifacts.
+  - **F49 matrix, service key:** all six `200`; `seasons` 1 row,
+    `tournament_tiers` 3 rows, `current_season` correctly resolving to the
+    test season; `profiles`/`tournament_results`/`season_standings` `[]`
+    because they are genuinely empty.
+  - **Mechanism confirmed at the catalog level, not inferred from behavior:**
+    both views carry `reloptions = {security_invoker=on}`; all four new tables
+    show `relrowsecurity = t` with **0 policies**; `btree_gist` absent.
+  - **`/ots` v3.0 read path re-verified** by replaying the bot's three actual
+    queries through PostgREST: active tournament resolves with its
+    `challonge_tournament_id`, participant lookup returns the expected id, and
+    the `players` read returns `ingame_name`/`pokepaste_url` unchanged.
+- **Pre-existing v3.0 seed bug found and fixed during that run (RFC-007
+  block, outside RFC-011's nominal scope — fixed with explicit approval
+  because it blocked RFC-011's own apply).** The RFC-007 participants seed
+  guarded `on conflict (tournament_id, challonge_participant_id) do nothing`,
+  but `challonge_participants_cache` carries **three** unique indexes. Against
+  any database where a real Challonge sync has run, the placeholder ids
+  (1001–1003) collide with synced rows on `lower(ingame_name)` instead — same
+  name, different id — which the targeted clause does not catch. Under
+  `ON_ERROR_STOP=1` the apply **aborted at that statement before creating a
+  single v4.0 object**. A container seeded only from `schema.sql` always holds
+  the placeholder ids and therefore never reproduces it, which is why every
+  prior container run passed. Fixed by dropping the conflict target
+  (`on conflict do nothing`), which catches all three indexes. Re-verified
+  both directions: a fresh database still seeds 3 participants / 3 tiers /
+  3 players on pass 1 and writes nothing on pass 2, and the previously-failing
+  database now applies clean at exit 0.
+- **Tracked follow-ups (not RFC-011's scope):** RFC-012 must write
+  `tournament_results.ingame_name` already-trimmed if it wants
+  `season_standings.ingame_name` to display without whitespace (the view
+  deliberately does not `btrim()` it — see §3.7's comment); RFC-013 owns the
+  command half of F60/F69 (`/link-organizer`, `/unlink`); RFC-014 owns
+  `RUNBOOK.md` §9 (the F48 undeletability trap and F42's same-boundary-day
+  gotcha) and the presentation half of F70. **RFC-014 also owes a `RUNBOOK.md`
+  §1 rewrite** to require an explicit `tier_id` selection when creating a
+  tournament via Studio's Table Editor — see Operator apply note 8 above and
+  the matching entry in `RFCS.md`'s "Tracked follow-ups" — since §1 as written
+  today will fail a not-null violation on `tier_id` the moment this schema is
+  live.
