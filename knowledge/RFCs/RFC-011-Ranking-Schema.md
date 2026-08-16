@@ -891,12 +891,19 @@ fixture, so RFC-012/013/014 have data before any live season exists:
   above the `revoke` explaining why); no `pg_roles`-guarded `do $$` swap was
   made.
 - **Operator apply notes (Tier 2 — steps 3–5 now discharged against a *local*
-  Supabase stack on 2026-08-16; steps 1, 2 and 6 remain owed against the live
-  project).** The plan assumed Tier 2 could not be run without the live
-  project. That turned out to be wrong: a full local Supabase stack (real
-  PostgREST + Kong, PG 17.6) was available, and the anon/service-key matrix ran
-  against it for real — see "Local Supabase verification" below. Applying to
-  live Supabase, and the in-guild `/ots` smoke test, are still genuinely owed.
+  Supabase stack on 2026-08-16; steps 1, 2 and 6 discharged against the live
+  project the same day — see "Live verification" below).** The plan assumed
+  Tier 2 could not be run without the live project. That turned out to be
+  wrong: a full local Supabase stack (real PostgREST + Kong, PG 17.6) was
+  available, and the anon/service-key matrix ran against it for real — see
+  "Local Supabase verification" below.
+
+  The steps below are kept as written for the record, but note that step 2 was
+  overtaken by the migration cutover: the schema was **not** pasted into the
+  Studio SQL editor in the end. Production was baselined with
+  `supabase migration repair --status applied` and this RFC's DDL arrived via
+  `supabase db push`, making RFC-011 the first migration ever pushed to the
+  live project rather than the last one hand-applied.
   1. Before applying, run `select version();` against the live Supabase
      project to confirm PG ≥ 15 (required for `security_invoker`).
   2. Apply the new `schema.sql` section via the Studio SQL editor, as always.
@@ -979,6 +986,19 @@ fixture, so RFC-012/013/014 have data before any live season exists:
   both directions: a fresh database still seeds 3 participants / 3 tiers /
   3 players on pass 1 and writes nothing on pass 2, and the previously-failing
   database now applies clean at exit 0.
+- **Live verification (2026-08-16) — reported by the operator, closing the
+  Tier-2 items.** Production was baselined with `supabase migration repair
+  --status applied` against the baseline migration, so the v2.0/v3.0 DDL was
+  marked applied without re-running against live data, and this RFC's DDL was
+  delivered with `supabase db push`. The operator reports the anon/service-key
+  matrix **sane** and `/ots` **intact** in the guild. RFC-011's schema is
+  therefore live and its read path unregressed.
+
+  Recorded at the granularity the operator reported it: no per-object HTTP
+  codes or row counts were captured from the live run, so this entry claims
+  only what was actually observed. The detailed per-object matrix in "Local
+  Supabase verification" above remains the reproducible evidence for the
+  mechanism; this entry is the confirmation that production agrees.
 - **Tracked follow-ups (not RFC-011's scope):** RFC-012 must write
   `tournament_results.ingame_name` already-trimmed if it wants
   `season_standings.ingame_name` to display without whitespace (the view

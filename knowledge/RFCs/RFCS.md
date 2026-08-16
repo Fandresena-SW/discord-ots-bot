@@ -142,7 +142,7 @@ depends on all lower-numbered RFCs.
 
 | # | RFC | Features | Complexity | Status |
 |---|-----|----------|-----------|--------|
-| **011** ✅ | [Ranking Schema: Profiles, Seasons, Tiers & Frozen Results](RFC-011-Ranking-Schema.md) | F38–F50, F66, F67, + DDL halves of F60/F69/F70 | Medium | ✅ Complete — schema-only, verified in a disposable local Postgres container (two-pass idempotency, fresh and v2.0/v3.0-seeded); F49's PostgREST anon/service-key half is operator-owed against live Supabase |
+| **011** ✅ | [Ranking Schema: Profiles, Seasons, Tiers & Frozen Results](RFC-011-Ranking-Schema.md) | F38–F50, F66, F67, + DDL halves of F60/F69/F70 | Medium | ✅ Complete and **live** 2026-08-16 — schema-only; two-pass idempotency verified fresh, v2.0/v3.0-seeded, and against real synced data; F49's anon/service-key matrix proven through real PostgREST locally, then confirmed on the live project. Delivered by `db push` after the migration cutover, not hand-applied |
 | **012** | [Points Engine & Sync Freeze](RFC-012-Points-Engine-And-Sync-Freeze.md) | F51–F57, F68, F72, F74 | High | 📝 Draft |
 | **013** | [Identity Binding, `/ots` Refactor & Debug Lookup](RFC-013-Identity-Binding-And-OTS-Refactor.md) | F58–F61, F69 (cmd), F71, F76, F77, F78 | High | 📝 Draft |
 | **014** | [Ranking Read Commands, Runbook & Release](RFC-014-Ranking-Read-Commands-And-Release.md) | F62–F65, F70, F73, F75 | Medium | 📝 Draft |
@@ -470,6 +470,11 @@ now prevents structurally.
    tournament fixture ran *before* the v4.0 block added the not-null `tier_id`;
    with migrations all DDL precedes all seed, so the fixture had to supply
    `tier_id` — the same trap that makes RUNBOOK §1 stale.
+
+**Live as of 2026-08-16.** Production was baselined with `supabase migration
+repair --status applied` and RFC-011's DDL delivered by `supabase db push`;
+the operator reports the anon/service-key matrix sane and `/ots` intact. The
+cutover is complete, not merely prepared.
 
 **Tracked follow-up — owner: RFC-014.** RUNBOOK carries a banner for both stale
 procedures (hand-applying the schema, and §1's tournament creation) but its nine
