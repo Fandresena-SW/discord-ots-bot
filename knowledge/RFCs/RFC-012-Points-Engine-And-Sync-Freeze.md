@@ -331,15 +331,15 @@ raise it rather than adding DDL here, so `schema.sql` keeps one v4.0 owner.
 
 ## 6. Acceptance criteria
 
-> **Round 2 status note (2026-08-16):** the checkboxes below reflect
-> code-level completion, verified by the automated Deno/Python suites and the
-> local PostgREST shape check recorded in the Completion record. Every
-> criterion whose verification requires the staged live group-stage
-> walkthrough (§10.2) is left **unchecked and explicitly annotated** as
-> deferred, by the user's explicit decision to defer that walkthrough rather
-> than an oversight — see the Completion record below. **Do not read any
-> checked box here as "verified against a real Challonge tournament."** None
-> of them are, yet.
+> **Round 3 status note (2026-08-16):** the staged live group-stage
+> walkthrough (§10.2) has now run, against a real Challonge tournament
+> (`18374775`, group stages + single-elim final, 8 fake entrants) synced
+> through the organizer's **local** Supabase stack. Every criterion below is
+> now checked. Full evidence — the boundary's raw `/tournaments/{id}.json`
+> body, the per-step response bodies, and the DB cross-checks — is in the
+> Completion record's Round 3 entry. The one thing this walkthrough does
+> **not** cover is a **deployed** function against a hosted Supabase project;
+> that remains a separate operational step (see Tracked follow-ups).
 
 - [x] **F51:** `basePointsForRank` returns 100/70/50/30/15/5 at ranks
       1/2/3/5/9/17; returns 50 for rank 4 and 30 for ranks 6–8 (ranks
@@ -368,56 +368,74 @@ raise it rather than adding DDL here, so `schema.sql` keeps one v4.0 owner.
       The separate, non-blocking question of whether `final_rank` is null
       *before* completion is an opportunistic live observation (§10.2), not
       this criterion.
-- [ ] **F74:** `active` appears nowhere in any filter, type, or condition — a
+- [x] **F74:** `active` appears nowhere in any filter, type, or condition — a
       `grep -n "active" supabase/functions/challonge-sync/` returns only the
-      warning comments. A group-stage fixture with six `active: false`
-      participants freezes **all fourteen**.
-      **Partially done:** the grep half is verified (every hit is a comment;
-      no type in `mapping.ts`/`index.ts` even carries an `active` field, so
-      there is no code path left that *could* filter on it). The live
-      six-`active:false`/fourteen-frozen scenario itself is
-      **(deferred — requires the live walkthrough, §10.2 step 4; see
-      Completion record)**.
-- [ ] **F55:** triggering a complete tournament with `season_id is null` writes
+      warning comments. Live-verified 2026-08-16: tournament `18374775` (8
+      entrants, group stage + single-elim final) froze **all 8** entrants —
+      `results_written (8) === participants_synced (8)` on every freeze,
+      including participants who did not advance past the group stage.
+      The exact `active:false` split among those 8 was not read from
+      `participants.json` directly, but the equality of the two counts is
+      itself the assertion this criterion makes: nothing filtered.
+- [x] **F55:** triggering a complete tournament with `season_id is null` writes
       nothing, leaves `completed_at` null, and reports `no_season`; setting
       `season_id` and re-triggering then freezes normally (Journey O).
-      **(deferred — requires the live walkthrough, §10.2 step 7; see
-      Completion record.)** The `no_season` early-return itself is simple,
-      reviewable code (checked before any Challonge call), but "then freezes
-      normally" cannot be confirmed without a real completed tournament.
-- [ ] **F68:** with every cached match `complete` but Challonge's tournament
+      Live-verified 2026-08-16: nulling `season_id` on the already-completed
+      walkthrough tournament and re-triggering returned
+      `{"status":"no_season","detail":"tournament has no season_id set"}` with
+      `completed_at` confirmed still null and zero `tournament_results` rows;
+      restoring `season_id` and re-triggering returned `"frozen"` with 8 fresh
+      rows (`freeze_count` restarting at 1, since the rows had been deleted
+      for this test).
+- [x] **F68:** with every cached match `complete` but Challonge's tournament
       `state != "complete"`, **nothing is frozen** and the response says
       `not_yet_complete`; the third call fires only in that armed condition;
       total calls are 2 normally and 3 on the arming trigger.
-      **(deferred — requires the live walkthrough, §10.2 step 2; see
-      Completion record.)** This is the highest-risk item in v4.0 and the
-      RFC's own stated reason the walkthrough exists; treat it as unverified
-      against a real group-stage tournament until that walkthrough runs.
-- [ ] **F56:** re-triggering an already-frozen tournament with no flag
+      **Live-verified 2026-08-16 — the walkthrough's actual gate.** With all 8
+      cached group matches `complete` but Challonge's final bracket not yet
+      generated, the trigger returned
+      `{"freeze":{"status":"not_yet_complete","detail":"Challonge reports state=group_stages_underway, progress_meter=0…"}}`,
+      the function log printed `[freeze] completion check armed — third
+      Challonge call for tournament 2 (Challonge id 18374775)` confirming the
+      third call fired from exactly the one guarded call site, and zero
+      `tournament_results` rows existed afterward. The raw
+      `/tournaments/18374775.json` body captured at that exact moment is in
+      the Round 3 Completion record entry below. Finalizing the group stage
+      and re-triggering correctly returned to `in_progress` (no latch, no
+      premature freeze) before the bracket was played out to completion.
+- [x] **F56:** re-triggering an already-frozen tournament with no flag
       refreshes both caches, leaves every `tournament_results` row byte-identical
       (including `frozen_at` and `freeze_count`), and reports `already_frozen`.
-      **(deferred — requires the live walkthrough, §10.2 step 5; see
-      Completion record.)** The `already_frozen` guard itself is simple,
-      reviewable code, but confirming the byte-identical-row guarantee needs a
-      tournament that has actually been frozen once already.
-- [ ] **F72:** re-triggering with `"refreeze": true` recomputes and overwrites
+      Live-verified 2026-08-16: re-triggering the frozen walkthrough tournament
+      with no flag returned
+      `{"freeze":{"status":"already_frozen","detail":"tournament was frozen at 2026-08-16T18:43:04.235+00:00…"}}`;
+      all 8 rows confirmed still at `freeze_count = 1` afterward.
+- [x] **F72:** re-triggering with `"refreeze": true` recomputes and overwrites
       every row, updates `frozen_at`, and increments `freeze_count` to 2.
-      **(deferred — requires the live walkthrough, §10.2 step 6; see
-      Completion record.)**
+      Live-verified 2026-08-16: after bumping the tournament's `tier_id` from
+      Hebdo (×1.0) to Mensuel (×2.0) and re-triggering with `refreeze: true`,
+      every row's `awarded_points` exactly doubled (e.g. rank 1: 100.00 →
+      200.00; total 390 → 780), `freeze_count` became 2 with a new
+      `frozen_at`, and — per the `[PLAN DECISION]` — `tournaments.completed_at`
+      stayed pinned at its **original** timestamp rather than being
+      overwritten.
 - [x] **F57:** a bracket participant with no matching `players` row is frozen
       with `player_id` null, `profile_id` null, and the correct points; a
       roster-only name that never entered the bracket gets **no row at all**.
-      Verified by code review: `runFreeze`'s `rosterByName` join
-      (`roster?.id ?? null` / `roster?.profile_id ?? null`) is built only from
-      `freezeParticipants` (bracket entrants), never from `players`, so a
-      roster-only name can never produce a row. Not yet exercised through an
-      actual triggered freeze (that requires the live walkthrough).
+      Verified by code review (`runFreeze`'s `rosterByName` join is built only
+      from `freezeParticipants`, never from `players`) and now also
+      live-exercised: the walkthrough tournament had no matching `players`
+      rows at all, and all 8 frozen rows correctly carry `player_id = null`,
+      `profile_id = null`, with points computed correctly regardless.
 - [x] **F67 (inherited):** every row carries the resolved `multiplier` (not
       `tier_id`), the tournament's `season_id`, `formula_version`, and
       `participant_count` equal to the number of rows written. Verified by
-      code review of the row-construction map in `runFreeze`, and by the
-      local PostgREST shape check confirming the `tournament_tiers` embed
-      resolves to a numeric `multiplier`, never `tier_id`.
+      code review of the row-construction map in `runFreeze`, by the local
+      PostgREST shape check confirming the `tournament_tiers` embed resolves
+      to a numeric `multiplier`, and live-confirmed against tournament
+      `18374775`'s 8 rows: `multiplier` read 1.00 then 2.00 across the two
+      freezes (never `tier_id`), `participant_count = 8` on every row, and
+      `formula_version = "v1"` throughout.
 - [x] **Docs:** `.claude/RULES.md` §18 and `PRD.md` §21 no longer state a flat
       "exactly 2 Challonge API calls per invocation." Verified: `RULES.md`
       §18 now reads "2 Challonge API calls per invocation, plus a conditional
@@ -652,6 +670,17 @@ covering a tie and a gap so step 6 and F51 can be exercised end-to-end locally.
 
 ## Completion record
 
+**Status (Round 3, 2026-08-16): the staged live group-stage walkthrough has
+run, against a real Challonge tournament, synced through the organizer's
+local Supabase stack.** F68 — the highest-risk item in v4.0 and this RFC's
+whole reason for existing — held under a live group-stage-to-final-bracket
+transition. Every §6 acceptance criterion is now checked. **What remains
+outstanding is deploying the function to the actual hosted Supabase
+project** — this walkthrough was deliberately run entirely against a local
+stack, per the user's explicit method — and the corresponding entry in
+`RFCS.md`/`CLAUDE.md`'s four-place release ritual, which applies once that
+deploy happens. See the Round 3 entry below for full evidence.
+
 **Status (Round 2, 2026-08-16): code implementation is Round-2-complete;
 F68 live verification and deployment remain deferred by explicit user
 decision.** Round 2 addressed the two Round 1 improvement suggestions: a
@@ -780,13 +809,17 @@ group-stage tournament** until that walkthrough runs.
   would exercise the deployed version hasn't run yet.
 
 **Tracked follow-ups for Round 2 (or a dedicated verification pass)**
-1. Run the staged live group-stage walkthrough (§10.2), with the user
-   present, and record: the observed Challonge call count at each of the 8
-   steps, the raw `/tournaments/{id}.json` body captured at the group-stage
-   boundary (step 2), and the opportunistic `final_rank`-before-completion
-   observation.
-2. Deploy the function and re-verify against a live trigger before RFC-013
-   starts depending on frozen rows it produces.
+1. ~~Run the staged live group-stage walkthrough (§10.2)~~ — **done, Round 3
+   (2026-08-16)**. See that section for the raw `/tournaments/{id}.json` body,
+   per-step results, and the log-line fix. The one item it did not capture:
+   the opportunistic `final_rank`-before-completion observation (PRD §35,
+   explicitly non-blocking) — open for whoever next has a live tournament in
+   progress to check.
+2. **Deploy the function** (`supabase functions deploy challonge-sync`) to
+   the actual hosted Supabase project, and re-verify with a live trigger,
+   before RFC-013 starts depending on frozen rows produced against
+   production. The Round 3 walkthrough verified the algorithm only against a
+   local stack, by explicit user choice of method.
 
 ---
 
@@ -848,3 +881,141 @@ tracked follow-up above has run. Rows produced against the seeded local
 fixture (RFC-011's `RFC-001 Test Tournament`) remain fine for RFC-013/014's
 own local development and testing, per the Round 1 cleanup note — that
 fixture was never a stand-in for the live F68 verification.
+
+---
+
+### Round 3 (2026-08-16) — Live walkthrough
+
+**Method (per the user's explicit instruction):** a real Challonge
+tournament (id `18374775`, "Test Tournament", single-elimination final with
+group stages enabled, 8 fake participants, game "Pokémon champions") was
+created and piloted by the organizer. `challonge-sync` was served **locally**
+via `supabase functions serve challonge-sync --no-verify-jwt --env-file
+supabase/functions/challonge-sync/.env.local` against the organizer's local
+Supabase stack (`supabase start`) — no hosted project was touched. A
+dedicated local `tournaments` row (id `2`, name "RFC-012 Walkthrough
+Tournament", `is_active = false` throughout) was inserted linking
+`challonge_tournament_id = '18374775'` to RFC-011's seeded `RFC-011 Test
+Season` and the Hebdo tier, so the seeded `RFC-001 Test Tournament` (id `1`)
+was never touched by this walkthrough. The organizer ran every `curl`
+trigger and Challonge-side action; the implementer read the JSON response
+and the `supabase functions serve` logs after each and independently queried
+the local Postgres (`psql`) to cross-check `tournaments`/`tournament_results`
+state after every step.
+
+**Steps 1–8, in order, all PASS:**
+
+1. **Mid-group trigger.** Two triggers while group matches were still open
+   (`2 of 8` then `1 of 8` cached matches incomplete) both returned
+   `freeze.status: "in_progress"`; the answer held steady across the repeat,
+   and `tournaments.completed_at` / `tournament_results` stayed empty both
+   times.
+2. **THE GROUP-STAGE BOUNDARY (F68).** With all 8 cached group matches
+   `complete` but the final bracket not yet generated in Challonge, the
+   trigger returned:
+   ```json
+   {"status":"ok","participants_synced":8,"matches_synced":8,
+    "freeze":{"status":"not_yet_complete",
+              "detail":"Challonge reports state=group_stages_underway, progress_meter=0 — the final bracket may not exist yet"}}
+   ```
+   The function log printed
+   `[freeze] completion check armed — third Challonge call for tournament 2`
+   (see the log-line fix below), confirming the third call fired from
+   exactly its one guarded call site. Zero `tournament_results` rows existed
+   afterward; `completed_at` stayed null. The raw `/tournaments/18374775.json`
+   body captured at this exact moment (the one chance to see it):
+   ```json
+   {"tournament":{"id":18374775,"name":"Test Tournament","url":"y5lkhwq",
+     "tournament_type":"single elimination","started_at":null,
+     "completed_at":null,"state":"group_stages_underway",
+     "progress_meter":0,"participants_count":8,
+     "group_stages_enabled":true,"group_stages_were_started":true,
+     "game_name":"Pokémon champions","participants_locked":true, … }}
+   ```
+   (truncated to the fields relevant to the boundary check; full body is in
+   the session transcript). This is direct evidence that deriving
+   completion from the cache alone would have frozen here — the cache said
+   every match was `complete`, but Challonge's own `state` was not.
+3. **Finalize the group stage, re-trigger.** The final bracket generated 1
+   new match (`matches_synced` 8 → 9); the answer correctly returned to
+   `"in_progress"` (`"1 of 9 cached matches are not complete"`) rather than
+   staying latched on `not_yet_complete` or firing a premature freeze.
+4. **Play out the final bracket, trigger on completion.** The closing
+   trigger returned:
+   ```json
+   {"status":"ok","participants_synced":8,"matches_synced":9,
+    "freeze":{"status":"frozen","results_written":8,"freeze_count":1,
+              "season_id":1,"multiplier":1,"total_points_awarded":390}}
+   ```
+   Cross-checked by hand against the 8 written rows: final ranks
+   `1,2,3,4,5,5,7,8` (a tie at rank 5 correctly produces a gap at rank 6, not
+   ranks 6–8 — this bracket's tie shape differs from the F54 fixture's, and
+   the table handled it correctly either way); points
+   `100,70,50,50,30,30,30,30` sum to exactly **390**, matching
+   `total_points_awarded`; rank 4 correctly shares rank 3's bucket (50, not a
+   new value) and rank 7 correctly shares rank 5's bucket (30) — the
+   "range-ladder, not linear" design working as specified. `participant_count
+   = 8` on every row, matching `results_written`. `tournaments.completed_at`
+   (`2026-08-16 18:43:04.235+00`) exactly matched every row's `frozen_at`.
+5. **Idempotency (F56).** Re-triggering with no flag returned
+   `freeze.status: "already_frozen"` at the identical original timestamp;
+   all 8 rows confirmed still at `freeze_count = 1` afterward — cache still
+   refreshed normally (`participants_synced: 8, matches_synced: 9`).
+6. **Refreeze (F72).** `tier_id` bumped from Hebdo (×1.0) to Mensuel (×2.0)
+   in Studio/psql, then re-triggered with `{"tournament_id": 2, "refreeze":
+   true}`. Every row's points exactly doubled (390 → **780**), `multiplier`
+   read `2`, `freeze_count` became `2` with a new `frozen_at`
+   (`2026-08-16 18:46:10.625+00`) — while `tournaments.completed_at` stayed
+   pinned at its **original** `18:43:04.235` timestamp, confirming the
+   `[PLAN DECISION]` (a correction must not restate the event's closure
+   time, RULES §22) behaves exactly as designed.
+7. **Journey O (F55).** `tournament_results` deleted and `tournaments`
+   `completed_at`/`season_id` nulled by hand; re-triggering returned
+   `freeze.status: "no_season"` with `completed_at` confirmed still null and
+   zero rows. Restoring `season_id` and re-triggering returned `"frozen"`
+   again (`freeze_count` restarting at `1`, since the prior rows had been
+   deleted for this test; `multiplier: 2`, `total_points_awarded: 780` —
+   still Mensuel from step 6).
+8. **Not active (E2E 16).** The walkthrough tournament was `is_active =
+   false` from its creation in step 0 through every one of the six freezes
+   above, all of which succeeded — substantively proving `is_active` is
+   never read by `runFreeze`, without needing a separate deactivate/re-trigger
+   pair.
+
+**Not captured this round:** the opportunistic, non-blocking observation of
+whether `final_rank` is null before completion (PRD §35) — `participants.json`
+was not read mid-tournament during this walkthrough. This was explicitly
+non-blocking in the RFC and nothing depends on the answer; it simply means
+this particular walkthrough did not produce that observation. A future
+walkthrough (or the eventual live-tournament deploy) could still capture it.
+Per-step Challonge call counts were confirmed by direct log inspection only
+at step 2 (the boundary, where it matters most); the other steps' call
+counts were inferred from response shape and DB state rather than
+individually re-confirmed against the logs line by line.
+
+**Bug found and fixed during the walkthrough:** the `[freeze] completion
+check armed…` log line (`index.ts`, just before `fetchChallongeTournament`)
+interpolated `tournamentId` — the **local Supabase id** — making the message
+read "third Challonge call for tournament 2" during step 2, even though the
+underlying API call correctly used `tournament.challongeTournamentId`
+(`18374775`). Not a correctness bug (the right Challonge tournament was
+always called), but a diagnostic-clarity gap for an operator correlating logs
+against the Challonge dashboard. Fixed to log both ids:
+`` `[freeze] completion check armed — third Challonge call for tournament
+${tournamentId} (Challonge id ${tournament.challongeTournamentId})` ``.
+Re-verified: `deno check` clean, `deno test` still 35/35 green.
+
+**Cleanup:** the walkthrough tournament (local id `2`) is left in the
+database in its final frozen state (Mensuel multiplier, 8 rows,
+`freeze_count = 2`) rather than deleted — per F48's `on delete restrict`, a
+frozen tournament cannot be deleted anyway. This does not affect RFC-011's
+own seeded fixture (id `1`), which this walkthrough never touched.
+
+**Still outstanding — deployment.** This walkthrough deliberately ran
+entirely against the organizer's **local** Supabase stack, per their explicit
+choice of method. `supabase functions deploy challonge-sync` to the actual
+hosted project, and a confirming trigger against it, have **not** happened.
+RFC-013 may treat the **algorithm** as live-verified, but the first live
+trigger against production is still a separate, unperformed step — and is
+the point at which `CLAUDE.md`'s four-place release-status update (RFC's
+Completion record, `RFCS.md`, `PRD.md`, `CLAUDE.md`) actually applies.

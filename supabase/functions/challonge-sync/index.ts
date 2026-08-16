@@ -369,7 +369,9 @@ async function runFreeze(
   // this check; Challonge's own tournament.state is the authority, never the
   // cache alone. Fired from exactly this one place, guarded by exactly this
   // one condition.
-  console.log(`[freeze] completion check armed — third Challonge call for tournament ${tournamentId}`);
+  console.log(
+    `[freeze] completion check armed — third Challonge call for tournament ${tournamentId} (Challonge id ${tournament.challongeTournamentId})`,
+  );
   const tourneyResult = await fetchChallongeTournament(tournament.challongeTournamentId, challongeApiKey);
   if (!tourneyResult.ok) {
     return {
