@@ -22,6 +22,11 @@ port = 54424
 
 [analytics]
 port = 54427
+# Logflare's Elixir migration pegs a core for ~2min on boot, which blows the
+# CLI's health-check deadline and fails `supabase start` for the whole stack
+# (vector also just blocks waiting on analytics:4000/health). Nothing here
+# needs the local Logs viewer — the bot only does PostgREST reads.
+enabled = false
 
 [edge_runtime]
 inspector_port = 8183
