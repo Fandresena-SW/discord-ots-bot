@@ -7,15 +7,21 @@ Guidance for working in this repository.
 A single-guild Discord bot that serves Pokémon **OTS** (Open Team Sheet) team
 lists. Current version: **v3.0**, shipped 2026-07-31.
 
-A player runs `/ots <their own username>`; the bot works out **who their current
-opponent is** from a Supabase-cached copy of the tournament's **Challonge**
-bracket, then DMs back an embed of that opponent's stored `team_text` (falling
-back to an ephemeral in-channel reply if the user's DMs are closed). User-facing
-text is in **French**.
+A player runs `/ots` (no argument); the bot infers the caller from a Discord
+account the organizer bound once (`/link-organizer`), works out **who their
+current opponent is** from a Supabase-cached copy of the tournament's
+**Challonge** bracket, then DMs back an embed of that opponent's stored
+`team_text` (falling back to an ephemeral in-channel reply if the user's DMs
+are closed). User-facing text is in **French**.
 
-> **The argument is the caller's OWN name, not the opponent's.** This is the
-> single most common thing to get wrong when reading this repo — `/ots zou`
-> means "I am zou, who am I playing?", and returns *someone else's* team.
+> **`/ots` takes no argument — RFC-013 removed it.** This is the single most
+> common thing to get wrong when reading this repo now: v3.0's `/ots <name>`
+> meant "I am `<name>`, who am I playing?", but that let anyone type any
+> roster name and scout the whole field's team sheets before being paired.
+> v4.0 closes that leak: the caller is always inferred from their **own bound
+> Discord account**, never from typed input. The only surviving typed-name
+> lookup is `/ots-organizer <name>`, a separate organizer-only debug command
+> (F78) — never an optional argument on `/ots`.
 
 ## Docs & knowledge base
 
@@ -27,10 +33,12 @@ reference doc there (do not scatter them across the repo root).
   Challonge-backed behavior; §1–§13 specify the Supabase data layer it builds
   on.
 - `knowledge/PRD.v4.final.md` — **the authoritative v4.0 spec.** Specified and
-  decided 2026-07-31, not yet built: a ranking system plus a **breaking `/ots`
-  change** that closes a v3.0 team-sheet scouting leak. §31.7 is the section to
-  read first; §37 is the locked-decision table. Numbering continues from
-  `PRD.md` (§27–§41, F38–F78, G11–G17, Journey I–Q, RFC-011–014).
+  decided 2026-07-31: a ranking system plus a **breaking `/ots` change** that
+  closes a v3.0 team-sheet scouting leak. §31.7 is the section to read first;
+  §37 is the locked-decision table. Numbering continues from `PRD.md`
+  (§27–§41, F38–F78, G11–G17, Journey I–Q, RFC-011–014). **In build:**
+  RFC-011 (ranking schema) and RFC-012 (points engine & sync freeze) are both
+  ✅ complete and live in production as of 2026-08-17; RFC-013–014 remain.
 - `knowledge/FEATURES.md` — feature breakdown (MoSCoW), F1–F78, in three
   appended release sections (v2.0 F1–F25, v3.0 F26–F37, v4.0 F38–F78). Its
   v4.0 section carries the supersession table for what v4.0 invalidates in the
@@ -113,11 +121,16 @@ Loaded from `.env` via `python-dotenv`:
 - `GUILD_ID` — target server ID. The `/ots` command is synced only to this
   guild in `on_ready`, so slash-command changes appear immediately for that
   server (no global-sync propagation delay).
-- `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — the live PostgREST read seam. The
-  service key bypasses RLS (every table is deny-by-default with no policies),
-  so it is worker-only and never committed.
-- All four vars above are validated at boot by `validate_config()`
-  (`bot.py:37`) — missing/invalid config fails fast before `client.run()`, not
+- `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — the live PostgREST seam (now read
+  **and write** — see RFC-013's `_supabase_write`). The service key bypasses
+  RLS (every table is deny-by-default with no policies), so it is
+  worker-only and never committed.
+- `ORGANIZER_DISCORD_ID` (RFC-013) — the organizer's Discord user id, gating
+  `/link-organizer` and `/ots-organizer` (F77). **Not a secret** — a public
+  Discord snowflake, safe to log — but required: the bot refuses to start
+  without it.
+- All five vars above are validated at boot by `validate_config()`
+  (`bot.py:38`) — missing/invalid config fails fast before `client.run()`, not
   on first `/ots`.
 
 **The Edge Function has its own, separate secrets** (set via `supabase secrets
@@ -128,40 +141,59 @@ last one is spelled differently from the bot's `SUPABASE_SERVICE_KEY`.
 
 ## Key mechanics (`bot.py`)
 
-- `/ots` (`bot.py:435`) **defers** the interaction immediately (ephemeral,
-  before any I/O), then `normalize_name()`s the raw input (strip + lower,
-  `bot.py:85`) to match the DB's trimmed/lower-indexed `ingame_name`.
-- `fetch_current_opponent()` (`bot.py:353`) drives the whole command. Within one
-  bounded (5s) session it: resolves the active tournament and its
-  `challonge_tournament_id`; looks the caller up in
-  `challonge_participants_cache`; finds their `open` match; picks the opponent;
-  resolves that id back to a name; and finally calls `fetch_active_player()`
-  (`bot.py:140`, the `players`-table read) for the **opponent's** `team_text`.
-  It **never raises** — every network/timeout/non-200 error collapses to
-  `"unavailable"` — and returns exactly one of: `"ok"`, `"no_active"`,
+- `/ots` **takes no argument** (RFC-013/F76 — the security fix). It **defers**
+  the interaction immediately (ephemeral, before any I/O), then calls
+  `fetch_opponent_for_profile(str(interaction.user.id))` — the caller is
+  always their own **bound profile**, never typed input.
+- `fetch_opponent_for_profile()` is `/ots`'s entry point. Within one bounded
+  (5s) session it: resolves the active tournament and its
+  `challonge_tournament_id`; looks up the caller's `profiles` row by
+  `discord_user_id`; finds their roster row (`players.profile_id`) in the
+  active tournament; then hands off to `_resolve_opponent()` — the extracted
+  v3.0 chain (cached participant → candidate id set → `open` match → opponent
+  name → `fetch_active_player()`'s `team_text` read). It **never raises** and
+  returns one of **nine** statuses: v3.0's seven (`"ok"`, `"no_active"`,
   `"no_challonge_link"`, `"requester_not_found"`, `"no_current_match"`,
-  `"opponent_no_ots"`, `"unavailable"`.
+  `"opponent_no_ots"`, `"unavailable"`) plus two new ones —
+  `"not_linked"` (no bound profile) and `"not_in_tournament"` (bound, but not
+  on this tournament's roster).
+- `fetch_current_opponent()` keeps its **exact original signature and seven
+  statuses**, unchanged — it is now `/ots-organizer`'s entry point (F78), the
+  organizer-only typed-name debug lookup that survives from v3.0. It never
+  touches `profiles`, which is exactly why it also works on unbound players.
 - **The dual-id trap.** A Challonge participant can be referenced in the matches
   cache by *either* its top-level `challonge_participant_id` *or*, in
   group-stage tournaments, a separate `challonge_group_player_id` — both stay
   live simultaneously once a final bracket is generated (group matches use the
   group id, bracket matches use the top-level id). `participant_candidate_ids()`
-  (`bot.py:243`) builds the candidate set and `pick_opponent_id()`
-  (`bot.py:328`) matches against **the whole set**. Reducing either back to a
-  single id silently breaks opponent resolution for one phase of the tournament.
-  See the long comments in `schema.sql` and `mapping.ts`.
-- `is_cache_stale()` / `_warn_if_stale()` (`bot.py:258`, `bot.py:266`) emit an
-  **operator-only** `print()` when the cache row backing a request is >48h old.
-  This never gates resolution, never changes the reply, and is never
-  player-facing.
-- The command branches on the status into **six** distinct French fail-soft
-  `followup` replies, or on `"ok"` builds the embed: title
-  `OTS de {opponent's stored ingame_name}`, description via `render_team_text()`
-  (fenced, hardened, size-capped, `bot.py:96`), color `0x3B4CCA`, and a
-  clickable `url` set to `pokepaste_url` **only when present** (never
-  `url=None`).
+  builds the candidate set and `pick_opponent_id()` matches against **the
+  whole set**. Reducing either back to a single id silently breaks opponent
+  resolution for one phase of the tournament. See the long comments in
+  `schema.sql` and `mapping.ts`.
+- `is_cache_stale()` / `_warn_if_stale()` emit an **operator-only** `print()`
+  when the cache row backing a request is >48h old. This never gates
+  resolution, never changes the reply, and is never player-facing.
+- `/ots` branches on the status into **eight** distinct French fail-soft
+  `followup` replies (via the `OTS_STATUS_MESSAGES` table), or on `"ok"`
+  builds the embed: title `OTS de {opponent's stored ingame_name}`,
+  description via `render_team_text()` (fenced, hardened, size-capped), color
+  `0x3B4CCA`, and a clickable `url` set to `pokepaste_url` **only when
+  present** (never `url=None`).
 - Delivery DMs the embed to the user, falling back to an ephemeral in-channel
   reply with the same embed on `discord.Forbidden` (DMs closed).
+- **`/link-organizer <name> <user> [confirm_rebind]`** (F58/F59/F60/F61/F71,
+  organizer-gated) binds a Discord account to a roster row, backfills that
+  season's `players`/`tournament_results` rows for the same normalized name
+  (bounded to `profile_id is null`, never stealing an already-attributed
+  row), and logs the propagation. **`/unlink <confirm>`** (F69) is the
+  player's own erasure path — clears roster links, anonymizes frozen
+  results, deletes the profile — no organizer gate, since erasing your own
+  data can't require asking someone else.
+- `bot.py`'s **first write path**: every `POST`/`PATCH`/`DELETE` goes through
+  the single `_supabase_write()` seam, the write-side twin of the read-only
+  `_fetch_*` helpers. The freeze (points, `final_rank`, standings) still
+  lives entirely in the `challonge-sync` Edge Function — `bot.py` only ever
+  writes profile/attribution columns.
 
 ## Key mechanics (`challonge-sync` Edge Function)
 
@@ -193,14 +225,20 @@ Do not relitigate these without an explicit decision to reopen them:
 - **Refresh is organizer-triggered, never polled** (Challonge free-tier cap).
 - **No fallback to arbitrary-name lookup** when a tournament has no Challonge
   link — `/ots` hard-fails with a distinct message instead.
+- **`bot.py`'s data access is one thin seam, reads and (since RFC-013) writes
+  alike** — `_supabase_write()` is the single write twin of the `_fetch_*`
+  read helpers; nothing calls `session.post`/`patch`/`delete` directly.
 
-## Planned direction (v4.0 — specified and decided, not yet built)
+## Planned direction (v4.0 — specified and decided, in build)
 
 A **ranking system** *and* a security fix to `/ots`, specified in
-`knowledge/PRD.v4.final.md`. **Fully decided as of 2026-07-31** — no RFC has been
-written and no code exists, but nothing is open for exploration. Read **§31.7**
-(the `/ots` refactor) first, then **§37** (the locked-decision table). Reopening
-a §37 decision is a scope change, not a judgement call.
+`knowledge/PRD.v4.final.md`. **Fully decided as of 2026-07-31** — nothing is
+open for exploration. **In build:** RFC-011 (ranking schema) and RFC-012
+(points engine & sync freeze, including the hosted `challonge-sync` deploy)
+are both ✅ complete as of 2026-08-17; RFC-013 (identity binding & `/ots`
+refactor) and RFC-014 (ranking read commands & release) remain. Read **§31.7**
+(the `/ots` refactor) first, then **§37** (the locked-decision table).
+Reopening a §37 decision is a scope change, not a judgement call.
 
 > ⚠️ **v4.0 is a breaking change to `/ots`, not an additive release.**
 > `/ots` loses its argument and infers the caller from a bound Discord profile.

@@ -15,11 +15,12 @@
   ```bash
   python -m unittest test_bot
   ```
-  Les 30 tests (`normalize_name`, `render_team_text`,
-  `participant_candidate_ids`, `pick_opponent_id`, `is_cache_stale`) doivent
-  passer. Ils couvrent la logique pure (F12/F14,
-  RFC-009 §7, RFC-010 §3.2/F36) que ce checklist exerce ensuite en
-  conditions réelles bout-en-bout.
+  Les 61 tests (`normalize_name`, `render_team_text`,
+  `participant_candidate_ids`, `pick_opponent_id`, `is_cache_stale`, et depuis
+  RFC-013 `validate_config`, `is_organizer`, `resolve_binding_conflict`,
+  `pick_season_roster_row`, `OTS_STATUS_MESSAGES`) doivent passer. Ils
+  couvrent la logique pure (F12/F14, RFC-009 §7, RFC-010 §3.2/F36, RFC-013
+  §7.2) que ce checklist exerce ensuite en conditions réelles bout-en-bout.
 - **Comment lire ce document:** chaque ligne est un scénario avec les étapes
   exactes à jouer, le résultat attendu, et une colonne **Résultat** à remplir
   (`PASS` / `FAIL` / `PENDING`) au moment de l'exécution réelle. Une ligne
@@ -32,6 +33,14 @@
   confirmées par l'organisateur le **2026-07-31**. La même répartition des
   rôles que pour RFC-006 a été suivie : code/docs par l'assistant, exécution
   live par l'organisateur (voir le § Sign-off en bas de ce fichier).
+- **Convention de lecture (RFC-013):** depuis RFC-013, `/ots` n'accepte plus
+  aucun argument — l'appelant est déduit du compte Discord relié à un joueur
+  par l'organisateur (F76). Dans les lignes 2, 3, 5, 6, 7, 8 et 9 ci-dessous,
+  lire `/ots <joueur>` comme « `/ots` exécuté par le compte Discord relié à
+  `<joueur>` » ; ces lignes restent valides sous cette lecture. Les lignes 1 et
+  4 sont en revanche devenues impossibles à rejouer telles quelles et sont
+  **struck** ci-dessous (voir leur colonne Notes) — re-testées par
+  `E2E-CHECKLIST-v4.md` (RFC-014), scénarios 24–28.
 - **Fixtures utilisées:** les lignes 1, 4, 5, 6 s'appuient sur les fixtures
   de seed de RFC-007 (`schema.sql` §6 — tournoi `RFC-001 Test Tournament`,
   lié à `challonge_tournament_id = 'rfc007-test-tournament'`, avec
@@ -48,10 +57,10 @@
 
 | # | Scénario | Étapes | Attendu | Résultat | Notes |
 |---|----------|--------|---------|----------|-------|
-| 1 | **Happy path** — les deux sens du match seedé | `/ots giovlacouture` dans le serveur, tournoi actif = `RFC-001 Test Tournament` ; puis `/ots zou` | `/ots giovlacouture` renvoie l'OTS de **zou** (son adversaire actuel) ; `/ots zou` renvoie l'OTS de **giovlacouture** — embed correct dans les deux cas (titre `OTS de {nom de l'adversaire}`, description = son `team_text`, couleur `0x3B4CCA`) | PASS | Confirme la résolution symétrique du match `open` (fixtures RFC-007). Préciser seed ou tournoi réel utilisé. |
+| 1 | ~~**Happy path** — les deux sens du match seedé~~ | `/ots giovlacouture` dans le serveur, tournoi actif = `RFC-001 Test Tournament` ; puis `/ots zou` | `/ots giovlacouture` renvoie l'OTS de **zou** (son adversaire actuel) ; `/ots zou` renvoie l'OTS de **giovlacouture** — embed correct dans les deux cas (titre `OTS de {nom de l'adversaire}`, description = son `team_text`, couleur `0x3B4CCA`) | PASS | Confirme la résolution symétrique du match `open` (fixtures RFC-007). Préciser seed ou tournoi réel utilisé. ⛔ Supersédé par RFC-013 / F76 — `/ots` n'accepte plus d'argument ; re-testé par `E2E-CHECKLIST-v4` (RFC-014), scénarios 24–28. |
 | 2 | **`no_active`** (inchangé depuis v2.0) | Désactiver temporairement le tournoi actif (`is_active = false`, aucun autre actif), puis `/ots <joueur>` | Réponse éphémère française : `⚠️ Aucun tournoi actif pour le moment. Réessayez plus tard.` | PASS | Réactiver le tournoi immédiatement après le test. Identique au scénario 4 de `E2E-CHECKLIST.md`. |
 | 3 | **`no_challonge_link`** (F34) | Sur un tournoi actif, mettre temporairement `challonge_tournament_id = NULL`, puis `/ots <joueur>` | Réponse éphémère française : `❌ Ce tournoi n'est pas relié à Challonge. Impossible de déterminer votre adversaire actuel.` | PASS | Restaurer la valeur de `challonge_tournament_id` immédiatement après le test. |
-| 4 | **`requester_not_found`** | `/ots un_nom_absent_du_cache_challonge` (nom absent de `challonge_participants_cache` pour le tournoi actif) | Réponse éphémère française : `❌ Aucun participant nommé **un_nom_absent_du_cache_challonge** trouvé dans le bracket Challonge de ce tournoi.` | PASS | Vérifier que le nom exact tapé est répété dans le message. |
+| 4 | ~~**`requester_not_found`**~~ | `/ots un_nom_absent_du_cache_challonge` (nom absent de `challonge_participants_cache` pour le tournoi actif) | Réponse éphémère française : `❌ Aucun participant nommé **un_nom_absent_du_cache_challonge** trouvé dans le bracket Challonge de ce tournoi.` | PASS | Vérifier que le nom exact tapé est répété dans le message. ⛔ Supersédé par RFC-013 / F76 — `/ots` n'accepte plus d'argument ; re-testé par `E2E-CHECKLIST-v4` (RFC-014), scénarios 24–28. |
 | 5 | **`no_current_match`** | `/ots koloina` (fixture seedée `pending`, sans adversaire) | Réponse éphémère française : `ℹ️ Vous n'avez pas de match en cours pour le moment.` | PASS | Utiliser explicitement `koloina` pour ce cas (fixture RFC-007 dédiée). |
 | 6 | **`opponent_no_ots`** | Sur le tournoi actif, ajouter temporairement un participant dans `challonge_participants_cache` sans ligne `players` correspondante, le placer en match `open` face à un joueur normal, puis `/ots <ce joueur normal>` | Réponse éphémère française : `⚠️ Votre adversaire a été trouvé, mais son OTS n'est pas encore enregistré. Contactez l'organisateur.` **et** un log opérateur distinct mentionnant `opponent_no_ots`/le nom de l'adversaire (à distinguer du scénario 4 côté log, RULES §17 point 5) | PASS | Supprimer les lignes de test (`challonge_participants_cache` + `challonge_matches_cache`) après vérification. |
 | 7 | **`unavailable`** (inchangé dans son mécanisme depuis v2.0) | Simuler une panne (couper temporairement l'accès réseau du worker à Supabase, ou pointer `SUPABASE_URL` vers une valeur invalide sur un environnement de test), puis `/ots <joueur>` | Réponse éphémère française : `⚠️ Service momentanément indisponible. Réessayez dans un instant.` **et** une ligne de log opérateur visible via `journalctl -u discord-ots-bot -f` | PASS | Ne pas exécuter contre la production réelle sans fenêtre de maintenance. Identique en mécanisme au scénario 5 de `E2E-CHECKLIST.md`, mais désormais sur le chemin `fetch_current_opponent`. |

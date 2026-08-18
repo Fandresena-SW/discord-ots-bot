@@ -1,25 +1,36 @@
 """
 Tests unitaires (stdlib unittest) pour les fonctions pures de bot.py :
-normalize_name (F12) et render_team_text (F14).
+normalize_name (F12), render_team_text (F14), participant_candidate_ids /
+pick_opponent_id (RFC-009), is_cache_stale (RFC-010), validate_config /
+is_organizer / resolve_binding_conflict / pick_season_roster_row /
+OTS_STATUS_MESSAGES (RFC-013).
 
 Runnable via: python -m unittest test_bot
 (ou par découverte: python -m unittest)
 
 Import-safety: bot.py appelle validate_config(...) au chargement du module et
-a besoin d'un GUILD_ID entier valide. On fixe donc des variables d'env
+a besoin d'un GUILD_ID entier valide et, depuis RFC-013, d'un
+ORGANIZER_DISCORD_ID entier valide. On fixe donc des variables d'env
 factices AVANT l'import, avec setdefault() pour ne pas écraser un .env local
 déjà chargé. Aucun réseau n'est sollicité: client.run() est protégé par le
-garde `if __name__ == "__main__":`.
+garde `if __name__ == "__main__":`. ORGANIZER_DISCORD_ID est délibérément
+au-dessus de 2^53 pour que toute la suite exerce par défaut le contrat de
+comparaison texte (les snowflakes Discord dépassent la précision d'un float).
 """
 
-import os
+import contextlib
+import io
+import types
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
+import os
 
 os.environ.setdefault("DISCORD_TOKEN", "test-token")
 os.environ.setdefault("GUILD_ID", "1")
 os.environ.setdefault("SUPABASE_URL", "http://localhost")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-key")
+os.environ.setdefault("ORGANIZER_DISCORD_ID", "1234567890123456789")
 
 import bot  # noqa: E402 (import must follow the env setup above)
 
@@ -197,6 +208,209 @@ class IsCacheStaleTests(unittest.TestCase):
         now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
         fetched_at = now - timedelta(days=30)
         self.assertTrue(bot.is_cache_stale(fetched_at, now))
+
+
+class ValidateConfigTests(unittest.TestCase):
+    """RFC-013 §7.2: validate_config grows a fifth parameter,
+    ORGANIZER_DISCORD_ID, parsed as an int but returned/stored as text."""
+
+    def _call(self, token="t", guild="1", url="http://x", key="k", organizer="123"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return bot.validate_config(token, guild, url, key, organizer)
+
+    def test_missing_organizer_discord_id_exits(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                bot.validate_config("t", "1", "http://x", "k", None)
+
+    def test_non_numeric_organizer_discord_id_exits(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                bot.validate_config("t", "1", "http://x", "k", "abc")
+
+    def test_valid_returns_int_guild_and_text_organizer(self):
+        guild_id, organizer_id = self._call(guild="42", organizer="999")
+        self.assertEqual(guild_id, 42)
+        self.assertIsInstance(guild_id, int)
+        self.assertEqual(organizer_id, "999")
+        self.assertIsInstance(organizer_id, str)
+
+    def test_whitespace_padded_organizer_id_normalizes(self):
+        _, organizer_id = self._call(organizer=" 123 \n")
+        self.assertEqual(organizer_id, "123")
+
+    def test_snowflake_above_2_53_survives_byte_exact(self):
+        big = "9007199254740993"  # 2^53 + 1
+        _, organizer_id = self._call(organizer=big)
+        self.assertEqual(organizer_id, big)
+
+    def test_missing_discord_token_still_exits(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                bot.validate_config(None, "1", "http://x", "k", "123")
+
+    def test_missing_guild_id_still_exits(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                bot.validate_config("t", None, "http://x", "k", "123")
+
+    def test_missing_supabase_url_still_exits(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                bot.validate_config("t", "1", None, "k", "123")
+
+    def test_missing_supabase_service_key_still_exits(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                bot.validate_config("t", "1", "http://x", None, "123")
+
+    def test_non_numeric_guild_id_still_exits_with_guild_message(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with self.assertRaises(SystemExit):
+                bot.validate_config("t", "abc", "http://x", "k", "123")
+        self.assertIn("GUILD_ID", buf.getvalue())
+        self.assertNotIn("ORGANIZER_DISCORD_ID", buf.getvalue())
+
+
+class IsOrganizerTests(unittest.TestCase):
+    """RFC-013 §7.2: is_organizer must compare as TEXT everywhere."""
+
+    def _interaction(self, user_id):
+        return types.SimpleNamespace(user=types.SimpleNamespace(id=user_id))
+
+    def test_exact_match(self):
+        with patch.object(bot, "ORGANIZER_DISCORD_ID", "123"):
+            self.assertTrue(bot.is_organizer(self._interaction("123")))
+
+    def test_mismatch(self):
+        with patch.object(bot, "ORGANIZER_DISCORD_ID", "123"):
+            self.assertFalse(bot.is_organizer(self._interaction("456")))
+
+    def test_snowflake_above_2_53_precision(self):
+        with patch.object(bot, "ORGANIZER_DISCORD_ID", "9007199254740993"):
+            self.assertTrue(bot.is_organizer(self._interaction(9007199254740993)))
+            self.assertFalse(bot.is_organizer(self._interaction(9007199254740992)))
+
+    def test_int_interaction_id_matches_text_constant(self):
+        with patch.object(bot, "ORGANIZER_DISCORD_ID", "42"):
+            self.assertTrue(bot.is_organizer(self._interaction(42)))
+
+
+class ResolveBindingConflictTests(unittest.TestCase):
+    """RFC-013 §7.2: one test per F59 branch."""
+
+    def test_no_roster_row_is_not_found(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict(None, None, None, None, False),
+            "not_found",
+        )
+
+    def test_unbound_row_is_bind(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, None, 5, None, False),
+            "bind",
+        )
+
+    def test_same_profile_is_already_bound_same_confirm_false(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, 5, 5, None, False),
+            "already_bound_same",
+        )
+
+    def test_same_profile_is_already_bound_same_confirm_true(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, 5, 5, None, True),
+            "already_bound_same",
+        )
+
+    def test_different_profile_no_confirm_needs_confirm(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, 5, 6, None, False),
+            "rebind_needs_confirm",
+        )
+
+    def test_different_profile_with_confirm_rebinds(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, 5, 6, None, True),
+            "rebind",
+        )
+
+    def test_account_slot_taken_wins_even_with_confirm_and_other_binding(self):
+        # The mentioned account already holds a DIFFERENT roster slot in this
+        # tournament — takes precedence over the rebind branches even when
+        # the row itself is also bound elsewhere and confirm_rebind is True.
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, 5, 6, "some_other_name", True),
+            "account_slot_taken",
+        )
+
+    def test_target_profile_none_on_bound_row_is_rebind_needs_confirm(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, 5, None, None, False),
+            "rebind_needs_confirm",
+        )
+
+    def test_target_profile_none_on_bound_row_with_confirm_is_rebind(self):
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, 5, None, None, True),
+            "rebind",
+        )
+
+    def test_account_slot_taken_wins_over_bind_on_unbound_row(self):
+        # The roster row itself is unbound (would otherwise be a plain
+        # "bind"), but the mentioned account already holds a DIFFERENT
+        # roster slot in this tournament — account_slot_taken still wins.
+        self.assertEqual(
+            bot.resolve_binding_conflict({"id": 1}, None, 6, "some_other_name", False),
+            "account_slot_taken",
+        )
+
+
+class PickSeasonRosterRowTests(unittest.TestCase):
+    """RFC-013 §7.2: F71's most-recent-tournament tie-break."""
+
+    def test_empty_rows_returns_none(self):
+        self.assertIsNone(bot.pick_season_roster_row([], [7, 8]))
+
+    def test_empty_id_list_returns_none(self):
+        self.assertIsNone(bot.pick_season_roster_row([{"tournament_id": 7}], []))
+
+    def test_single_row_returned(self):
+        row = {"tournament_id": 7, "id": 1}
+        self.assertEqual(bot.pick_season_roster_row([row], [7]), row)
+
+    def test_most_recent_tournament_wins(self):
+        older = {"tournament_id": 7, "id": 1}
+        newer = {"tournament_id": 9, "id": 2}
+        # recency list: 9 is more recent than 7
+        self.assertEqual(bot.pick_season_roster_row([older, newer], [9, 7]), newer)
+
+    def test_row_from_tournament_absent_from_recency_list_is_ignored(self):
+        row = {"tournament_id": 99, "id": 1}
+        self.assertIsNone(bot.pick_season_roster_row([row], [7, 8]))
+
+
+class OtsStatusMessagesTests(unittest.TestCase):
+    """RFC-013 §7.2: the /ots status -> French message dispatch table."""
+
+    EXPECTED_STATUSES = {
+        "no_active", "no_challonge_link", "not_linked", "not_in_tournament",
+        "requester_not_found", "no_current_match", "opponent_no_ots",
+        "unavailable",
+    }
+
+    def test_keys_are_exactly_the_eight_failure_statuses(self):
+        self.assertEqual(set(bot.OTS_STATUS_MESSAGES.keys()), self.EXPECTED_STATUSES)
+
+    def test_every_message_non_empty_and_distinct(self):
+        values = list(bot.OTS_STATUS_MESSAGES.values())
+        self.assertTrue(all(v for v in values))
+        self.assertEqual(len(set(values)), 8)
+
+    def test_unknown_status_falls_back_to_unavailable(self):
+        result = bot.OTS_STATUS_MESSAGES.get("some_future_status", bot.OTS_STATUS_MESSAGES["unavailable"])
+        self.assertEqual(result, bot.OTS_STATUS_MESSAGES["unavailable"])
 
 
 if __name__ == "__main__":

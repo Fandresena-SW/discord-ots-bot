@@ -644,5 +644,145 @@ for *and absent from the command list of* a non-organizer."
 
 ## Completion record
 
-*(to be filled in on completion — status, deliverables shipped, verification
-performed, deviations, and any tracked follow-ups)*
+**Round 1 — 2026-08-17. Status: code + unit tests complete; in-guild
+verification NOT yet performed (no live Discord/Supabase access available this
+round). Do not read this round as release-ready.**
+
+### Deliverables shipped this round
+
+- `bot.py`: `validate_config` extended to five params (`ORGANIZER_DISCORD_ID`,
+  parsed as int, stored as text); `OTS_STATUS_MESSAGES`; pure functions
+  `is_organizer`, `resolve_binding_conflict`, `pick_season_roster_row`; the
+  write seam `_service_session` + `_supabase_write`; `fetch_profile_id`; the
+  roster/profile read helpers (`_fetch_roster_row_for_profile`,
+  `_fetch_roster_row_by_name`, `_fetch_current_season_id`,
+  `_fetch_season_tournament_ids`, `_fetch_roster_rows_in_tournaments`,
+  `_fetch_profile_slot_in_tournament`, `_fetch_profile_discord_id`);
+  `_resolve_opponent` (extracted verbatim from the old `fetch_current_opponent`
+  body — a pure code move, byte-identical logic); `fetch_current_opponent`
+  rewritten as a thin wrapper over it (signature and seven statuses
+  unchanged); `fetch_opponent_for_profile` (F76's new entry point, nine
+  statuses); `run_binding` (F58/F59/F60/F61/F71) and `run_unlink` (F69); the
+  four command handlers — `/ots` (argument removed), `/ots-organizer` (F78),
+  `/link-organizer` (F58/F59/F61), `/unlink` (F69).
+- `test_bot.py`: `ORGANIZER_DISCORD_ID` added to the import-safety fixture
+  (deliberately above 2^53); five new test classes (`ValidateConfigTests`,
+  `IsOrganizerTests`, `ResolveBindingConflictTests`, `PickSeasonRosterRowTests`,
+  `OtsStatusMessagesTests`), 31 new tests. **61/61 green**, including all 30
+  pre-existing tests unchanged.
+- `.env.example`: `ORGANIZER_DISCORD_ID` added with the required non-secret
+  callout.
+- `.claude/RULES.md`: new §26 ("Write path, authorization and the amended
+  `/ots` entry point"), plus one-line pointers at §2's data-access bullet and
+  §15's heading.
+- `knowledge/E2E-CHECKLIST-v3.md`: rows 1 and 4 struck (`~~…~~`) with an
+  explicit supersession note pointing at F76/RFC-014; a reading-convention
+  line added for rows 2/3/5/6/7/8/9; the test-count line updated to 61.
+- `CLAUDE.md`: minimal correction only (per this RFC's own scope) — "What this
+  is" + the OWN-name warning block, the `/ots` bullets under "Key mechanics",
+  the Config section (five vars), and one Locked-decisions line for the write
+  seam. Version banner and the four release-status trackers left untouched
+  for RFC-014, as scoped.
+- `knowledge/RFCs/RFCS.md`: RFC-013's row updated from `📝 Draft` to a Round-1
+  in-progress marker (not `✅ Complete` — that would misstate the unverified
+  state).
+- No `schema.sql` / migration changes (none needed — confirmed against
+  RFC-011's DDL, see below). No `supabase/functions/` changes.
+
+### Verification actually performed this round
+
+- `python -m unittest test_bot -v`: **61/61 PASS** (30 pre-existing + 31 new),
+  run against a throwaway venv with `requirements.txt` installed (this
+  environment has no pre-existing project venv).
+- `python -c "import bot"` with all five env vars set: **import-safe**, no
+  side effects at import time.
+- `grep -n "username" bot.py`: **zero matches** — confirms the `/ots` command
+  signature carries no name parameter anywhere.
+- `grep -rn "TODO\|FIXME\|XXX" bot.py schema.sql supabase/functions/`: **zero
+  matches**.
+- `python -m py_compile bot.py`: **clean**.
+- Manually re-read the full diff against `bot.py`'s existing conventions
+  (log prefixes, French copy tone, `_escape_ilike` on every new filter,
+  fail-soft dispatch) and against RFC-011's migration for the exact
+  `profiles`/`players`/`current_season`/`tournament_results` shapes this RFC
+  reads and writes — no missing column or grant found; RFC-011's explicit
+  `service_role` grants already cover every table/view this RFC touches, so
+  **no new migration was added**, matching the RFC's own scope limit.
+
+### NOT performed this round (tracked as open, per RULES §10 — no fabricated PASS)
+
+**This is the largest gap in this round.** Every network-dependent branch is
+implemented but unverified end-to-end, listed exactly per RFC §10.2/§10.3 and
+the plan's §7.3 in-guild checklist:
+
+- `/link-organizer`: bind; idempotent re-bind (`already_bound_same`, zero
+  writes); rebind without/with `confirm_rebind`; unknown name; F71's
+  out-of-active-but-in-season name; `account_slot_taken`; a non-organizer
+  attempt; the propagation log's exact line shape against real data.
+- F60 forward auto-link verification (RFC-011's trigger) after a bind.
+- `/ots`: happy path (DM), `not_linked`, `not_in_tournament`,
+  `requester_not_found`, `no_current_match`, `opponent_no_ots`, DMs-closed
+  fallback.
+- `/ots-organizer`: as organizer, as non-organizer, on an unbound player;
+  the command-list visibility check.
+- `/unlink`: unconfirmed → confirmed → `/ots` returns `not_linked` →
+  organizer restores in one command.
+- Boot with `ORGANIZER_DISCORD_ID` missing/malformed (unit-tested in
+  isolation via `validate_config`, but not exercised via an actual process
+  boot/exit this round).
+- **The release's two security-gate scenarios, E2E 25 and 29, are
+  `PENDING`.** E2E 25 (`/ots` accepts no argument at all, verified in a
+  resynced Discord client) and E2E 29 (`/ots-organizer` refused for *and*
+  absent from the command list of a non-organizer) are exactly PRD §34's "a
+  suite passing with either failing means the release's security goal was
+  not met" pair — **do not treat this round as meeting that goal** until both
+  are run live and recorded here.
+- `deno test` was not re-run (no Edge Function file touched this round;
+  `mapping_test.ts`/`points_test.ts` are unaffected by this RFC's scope, per
+  the RFC's own §6 "N/A — zero Challonge traffic added").
+
+### Deviations from the plan (all within RULES/RFC bounds)
+
+1. **`/link-organizer`'s French-reply dispatch is an `if/elif` chain, not a
+   `.get(status, …)` dict**, unlike `/ots`'s `OTS_STATUS_MESSAGES` table. The
+   plan's §5.3 suggested mirroring `/ots`'s dict dispatch; the reply strings
+   here need per-call interpolation (`details['name']`, `user.mention`,
+   `details['other_name']`, …) that a flat string-keyed dict can't hold
+   without an extra layer of indirection (lambdas/format templates) — which
+   would be more structure, not less, for a six-branch chain that already
+   ends in a catch-all `else`. Functionally equivalent (every status handled,
+   nothing falls through); flagged here rather than done silently, and easy
+   to revisit if a reviewer prefers the literal table shape.
+2. **The propagation log tracks `players`- and `tournament_results`-touched
+   tournament ids as two separate lists**, not the single shared
+   `tournament_ids` the plan's `details` dict sketch implies. The RFC's own
+   §3.7 example log line shows *different* id lists for the two tables
+   (`players +3 [t7,t8,t9]` vs `tournament_results +2 [t7,t8]`), which a
+   single shared list cannot reproduce faithfully — the implementation
+   follows the RFC's example over the plan's dict shorthand. `details` still
+   exposes a merged `tournament_ids` (union of both) for any future caller
+   that only wants "what changed," alongside the per-table counts.
+3. **`CLAUDE.md`'s pre-existing v4.0 warning block used the French command
+   spelling `/ots-organisateur`.** Corrected to the actual shipped identifier,
+   `/ots-organizer` (English, per RULES §3: internal identifiers/commands are
+   English) — the RFC and plan both specify `ots-organizer` throughout.
+
+### Tracked follow-ups (not this RFC's scope — noted, not implemented)
+
+- `/standings`, `/profile`, `RANKING_CHANNEL_ID`, `RUNBOOK.md` §9,
+  `E2E-CHECKLIST-v4.md`, and `DEPLOYMENT.md`'s env-var section all remain
+  RFC-014's, untouched here, per the implementation prompt's Scope
+  Limitation.
+- The `/ots` behavior change still needs to be **announced** to players
+  (PRD §36) — a release requirement no RFC will remind anyone about on its
+  own; carried forward as an open item for whoever runs the release.
+- Break-glass (redeploying the previous `bot.py`) still restores the v3.0
+  scouting leak — accepted knowingly per PRD §38, restated here so it is not
+  rediscovered under pressure.
+
+### Next round
+
+Round 2 must run the full §7.3/§10.2 in-guild checklist above (including E2E
+25 and 29) against a live Discord server and Supabase project seeded per
+RFC-011, record real outcomes (no fabricated `PASS`), and only then flip
+`RFCS.md`'s row to `✅ Complete`.

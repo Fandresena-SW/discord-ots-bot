@@ -40,6 +40,7 @@ Guardrails for AI-assisted and human development on this repo. Derived from
   async helper (analogous to the current `fetch_pokepaste`) so the command
   handler stays readable and the network boundary is one place. This is the
   *only* structural concession — not a repository/service-layer pattern.
+  *Amended by RFC-013 — see §26: the seam gains one write twin.*
 - **Delete, don't disable.** The v2 refactor must fully remove `USERNAME_URLS`
   and `fetch_pokepaste` (the scraper) — no commented-out dead code, no dormant
   fallback branches in the live path. (The v1 break-glass fallback lives in git
@@ -329,6 +330,10 @@ client library beyond `fetch`.
 ---
 
 ## 15. The `/ots` command path — v3.0 opponent-resolution contract
+
+*Amended by RFC-013 — see §26: the entry point is now the caller's bound
+profile, not their typed input; the typed-name form survives only as
+`/ots-organizer`.*
 
 v3.0 **changes**, not extends, `/ots`'s argument meaning — this is an
 intentional, confirmed one-time behavior break (PRD §17, §24 item 4), not a
@@ -657,3 +662,57 @@ plans, agent definitions or the RUNBOOK) as historical.
   relaxing it: deny-by-default is now enforced instead of inherited.
 - **RLS and grants are independent.** Enabling RLS does not grant anything, and
   granting does not weaken RLS. Both are required; reason about them separately.
+
+## 26. Write path, authorization and the amended `/ots` entry point (RFC-013)
+
+`bot.py` gains its **first write path** in RFC-013. This section amends §2 and
+§15 rather than leaving them describing a bot that only ever reads.
+
+- **§2's read-only seam gains one write twin, `_supabase_write(session,
+  method, path, params, json_body, prefer)`.** Not a repository/service
+  layer — one function, mirroring the existing `_fetch_*` helpers' shape.
+  Every `POST`/`PATCH`/`DELETE` `bot.py` makes goes through it; nothing calls
+  `session.post`/`patch`/`delete` directly.
+- **The freeze still belongs in TypeScript.** This write seam does not reopen
+  §22's decision. `bot.py`'s only writes are one `profiles` row and
+  `profile_id` on `players`/`tournament_results` — attribution, never
+  `awarded_points`, `final_rank`, `multiplier`, or `season_id`. Those stay
+  Edge-Function-only, computed once at freeze time.
+- **§15's entry point is amended: "normalize the caller's own input" becomes
+  "resolve the caller's bound profile."** `/ots` takes no argument and infers
+  the caller via `fetch_opponent_for_profile(str(interaction.user.id))`;
+  §15.1's no-Challonge-link-first ordering and §15.3–5's resolution chain
+  (dual-id handling, embed, DM delivery with ephemeral fallback) are
+  unchanged. The typed-name form is **not deleted** — it survives only as
+  `/ots-organizer` (F78), a separate organizer-gated command, never an
+  optional argument on `/ots` under any justification (§20 still holds, now
+  doubly).
+- **Seven fail-soft statuses become nine.** `not_linked` and
+  `not_in_tournament` join `fetch_opponent_for_profile`'s vocabulary;
+  `fetch_current_opponent`'s original seven are unchanged and still serve
+  `/ots-organizer`. Four commands (`/ots`, `/ots-organizer`,
+  `/link-organizer`, `/unlink`) are now under the never-raise rule (§7/§17).
+- **F77's two gates, and `ORGANIZER_DISCORD_ID` is not a secret.** Both
+  `@app_commands.default_permissions(manage_guild=True)` (Discord-side
+  hiding) and an explicit `is_organizer(interaction)` check (application-side
+  refusal, compared as **text** — snowflakes exceed 2^53) are required on
+  both organizer commands; neither alone is sufficient. `ORGANIZER_DISCORD_ID`
+  is a new required env var, validated at boot (F19), but it is a public
+  Discord id, not a secret — it may be logged, unlike every other var in
+  `.env`.
+- **Backfill's mitigation is three-part and non-negotiable:** bounded to the
+  current season, filtered on `profile_id=is.null` (a backfill can never steal
+  a row already attributed to someone else), and `_escape_ilike`'d on every
+  name filter — which now guards a **write** that grants team-sheet access,
+  not just a read (§4's original concern). Every propagation is logged
+  server-side (profile id, normalized name, season id, per-table row counts,
+  tournament ids) — this is F60's mandatory audit trail, not optional polish.
+- **No self-service claim command, ever.** Binding is organizer-established
+  only (`/link-organizer`); `/unlink` is the only player-initiated identity
+  command, and it only ever removes a binding, never creates one.
+- **F25(b) ("cross-tournament identities"), a v2.0 Won't-have, is deliberately
+  reopened by this release.** Do not read §9 above as still current on that
+  one point.
+
+*(§2's data-access bullet and §15's heading above each carry a one-line
+pointer to this section.)*
