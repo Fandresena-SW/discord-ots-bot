@@ -1,4 +1,5 @@
 .env
+.env.rfc013-test
 supabase/functions/challonge-sync/.env.local
 supabase/.branches/
 supabase/.temp/
