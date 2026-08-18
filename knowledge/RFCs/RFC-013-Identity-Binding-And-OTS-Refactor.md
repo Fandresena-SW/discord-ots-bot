@@ -786,3 +786,142 @@ Round 2 must run the full §7.3/§10.2 in-guild checklist above (including E2E
 25 and 29) against a live Discord server and Supabase project seeded per
 RFC-011, record real outcomes (no fabricated `PASS`), and only then flip
 `RFCS.md`'s row to `✅ Complete`.
+
+---
+
+### Round 2 (2026-08-18) — In-guild verification and production deploy
+
+**Method.** The production `discord-ots-bot` systemd service was stopped
+(safe: no tournament was active), and this branch's code was run locally
+against the **real** Discord bot token/guild but a **local** Supabase stack
+(already seeded per RFC-011/007) via a throwaway `.env` swap — so every
+command hit the real Discord API while writes landed on disposable data.
+Two additional roster fixtures were added locally to exercise branches the
+seed data didn't cover: a second season-1 tournament (`amboara` for F71,
+plus an unattributed `tournament_results` row for `zou` to prove F60
+backfill), a 4th Challonge-cache participant with no `players` row (for
+`opponent_no_ots`), a roster row with no Challonge-cache entry at all (for
+`requester_not_found`), and one roster row pre-bound to a fake profile via
+direct SQL (to exercise the rebind flow without needing a second real
+Discord account). The organizer ran every command from their real Discord
+account; a friend's account was used for the two security-gate scenarios.
+
+**Every scenario below is a real, observed outcome — nothing here is
+inferred or assumed:**
+
+- **Command surface**: as organizer, all four commands visible
+  (`ots`/`ots-organizer`/`link-organizer`/`unlink`), `/ots` shows zero
+  parameters. As a non-organizer (friend's account): `ots` and `unlink`
+  visible and working; `ots-organizer` and `link-organizer` **absent from
+  the command list and unusable** — **E2E 29 PASS**. `/ots` confirmed
+  zero-parameter and working for the non-organizer account too — **E2E 25
+  PASS**. This is the release's security-gate pair; both hold.
+- **`/ots` — all nine statuses observed correct**: `not_linked` (before any
+  bind); `not_in_tournament` (bound only in an inactive tournament, F71);
+  `ok` happy path (DM delivered, embed correct) exercised repeatedly;
+  `opponent_no_ots` (opponent exists in the bracket, no `players` row);
+  `requester_not_found` (roster row present, absent from the Challonge
+  cache — organizer name-discipline gap) with its operator log line
+  matching the spec **verbatim**:
+  `fetch_opponent_for_profile: roster name 'sansbracket' (profile 5) absent from challonge_participants_cache for tournament 1 — organizer name-discipline gap`;
+  `no_current_match` (opponent's match temporarily marked complete);
+  `unavailable` (local Supabase stack stopped mid-test) with its own
+  verbatim operator log line:
+  `fetch_opponent_for_profile: request error: ClientConnectorError(...ConnectionRefusedError...)`
+  — followed by clean recovery on the very next `/ots`, no bot restart
+  needed, once the stack came back. **`opponent_no_ots` (DMs-closed
+  fallback) was explicitly not exercised this round** — see Deviations.
+- **`/link-organizer` — every F58/F59/F60/F61/F71 branch observed**: fresh
+  `bind` (F71 season-fallback search, name absent from the active
+  tournament, found via an earlier in-season tournament); idempotent
+  `already_bound_same` (zero writes — confirmed via DB read before/after);
+  `account_slot_taken` (F59d correctly outranking the rebind branches, per
+  its documented precedence — confirmed twice, including once by an
+  accidental test-sequencing mistake that inadvertently re-proved the same
+  precedence rule); `rebind_needs_confirm` → `rebind` (using a
+  SQL-pre-bound fake profile as the "previous holder", since a second real
+  Discord account wasn't available for that specific sub-case); `not_found`
+  (name absent from both the active tournament and the season); F60
+  backfill with real non-zero counts, propagation log confirmed **exactly**
+  matching the RFC's shorthand: `tournament_results +1 [t3]`. **F60 forward
+  auto-link (RFC-011's DB trigger) independently confirmed**: inserting a
+  brand-new, untrimmed roster row (`"  ZOU  "`) in a new tournament, with no
+  command run at all, resulted in the trigger auto-populating
+  `profile_id` to the same profile already bound to `zou` elsewhere — proof
+  the trigger fires on the normalized name with zero bot-side code
+  involved.
+- **`/unlink`**: unconfirmed → no change (verified via DB read); confirmed →
+  profile deleted, roster link cleared, `/ots` reverts to `not_linked`;
+  organizer restores the binding in one `/link-organizer` call. Exercised
+  as a full round-trip multiple times across the session.
+- **`/ots-organizer`**: works on an **unbound** player (bypasses `profiles`
+  entirely, as designed) reporting `opponent_no_ots`; works for an
+  arbitrary name as organizer reporting `ok`; refused and invisible for a
+  non-organizer (folded into the E2E 29 result above).
+- **Boot validation**: `ORGANIZER_DISCORD_ID` missing →
+  `Config error: missing required env var(s): ORGANIZER_DISCORD_ID`,
+  process exits **before** connecting to Discord (no
+  `logging in using static token` line). Malformed (`abc`) →
+  `Config error: ORGANIZER_DISCORD_ID must be an integer (a Discord user id)`,
+  same fail-fast behavior. Both match the plan's exact wording. Restoring
+  the correct value boots clean.
+- **A genuine but harmless operational artifact, worth recording**: partway
+  through the session, a stray earlier instance of the locally-run bot (a
+  process the assistant failed to kill cleanly on the first attempt) stayed
+  connected to the same Discord gateway session alongside the active one.
+  Every command during that window was dispatched to both processes; the
+  losing copy of each duplicate crashed at its **first statement**
+  (`interaction.response.defer(...)`, before any business logic ran) with
+  either `discord.errors.HTTPException: ... already been acknowledged` or
+  `discord.errors.NotFound: ... Unknown interaction`, caught cleanly by
+  discord.py's own command-tree error handler. No double-write, no
+  double-read, no crash, no state corruption occurred in any case — because
+  every handler defers **before** touching Supabase, exactly per RULES §5's
+  ordering. This was a test-environment artifact (resolved by killing the
+  correct PID), not a defect in `bot.py`; recorded here because it is a
+  genuinely reassuring data point about the defer-first discipline, not
+  because it reflects a bug.
+
+**Production deploy, same round.** `main` was fast-forwarded to include
+RFC-012's and RFC-013's commits (a clean fast-forward — `main` had no
+divergent commits) and pushed to `origin/main`. `ORGANIZER_DISCORD_ID` was
+added directly to the VM's existing `.env` (never scp'd/committed, per
+`DEPLOYMENT.md` §6's existing convention). `./deploy.sh` was run on the VM:
+`git pull`, dependency reinstall (no new dependencies), service restart.
+`systemctl status` confirmed `active (running)`, and the tailed log showed
+a clean gateway connection with no errors. **Confirmed against live
+production Supabase**: `profiles` is empty and no tournament is currently
+active — this deploy landed during a genuine lull, not against player data
+in a live event.
+
+**Deviations from the plan/RFC checklist this round:**
+
+1. **DMs-closed fallback was not exercised.** Explicitly skipped by the
+   user's choice, given time constraints. Risk is low: that code path
+   (`discord.Forbidden` → ephemeral fallback with the same embed) is
+   byte-identical to v3.0's, which already validated it under
+   `E2E-CHECKLIST-v3.md`'s original scenarios. Not re-verified here; flagged
+   rather than silently assumed.
+2. **The rebind sub-case (`rebind_needs_confirm`/`rebind`) used a
+   SQL-pre-bound fake profile as the "previous holder"** rather than a
+   second real Discord account, since the second account (a friend) wasn't
+   available at that point in the session. The two real-account scenarios
+   that specifically needed a second person — the security-gate pair, E2E
+   25/29 — **were** run with a real second account later in the session.
+   The fake-profile substitution only affects the rebind sub-case, whose
+   `previous_mention` rendered as an "Unknown User" mention, which is
+   cosmetically different from but functionally identical to a real
+   previously-bound account.
+
+**Operational note carried forward (not this RFC's scope to fix, but
+observed live and worth recording here):** with production `profiles` now
+empty, `/ots` will refuse every real player with `not_linked` until
+`/link-organizer` is run for them. `RUNBOOK.md` doesn't yet document this as
+a pre-flight step (that update belongs to RFC-014, per the RFCS.md tracked
+follow-up on RUNBOOK §1's staleness) — before the next event, every roster
+row needs a `/link-organizer` run, or that player is locked out of `/ots`
+entirely, mid-event.
+
+**RFC-013 is now ✅ complete.** All four release-status trackers (this
+record, `RFCS.md`, `PRD.v4.final.md`, `CLAUDE.md`) are updated in this same
+pass.

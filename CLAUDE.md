@@ -37,8 +37,9 @@ reference doc there (do not scatter them across the repo root).
   closes a v3.0 team-sheet scouting leak. §31.7 is the section to read first;
   §37 is the locked-decision table. Numbering continues from `PRD.md`
   (§27–§41, F38–F78, G11–G17, Journey I–Q, RFC-011–014). **In build:**
-  RFC-011 (ranking schema) and RFC-012 (points engine & sync freeze) are both
-  ✅ complete and live in production as of 2026-08-17; RFC-013–014 remain.
+  RFC-011 (ranking schema), RFC-012 (points engine & sync freeze) and
+  RFC-013 (identity binding & `/ots` refactor) are all ✅ complete and live
+  in production as of 2026-08-18; RFC-014 remains.
 - `knowledge/FEATURES.md` — feature breakdown (MoSCoW), F1–F78, in three
   appended release sections (v2.0 F1–F25, v3.0 F26–F37, v4.0 F38–F78). Its
   v4.0 section carries the supersession table for what v4.0 invalidates in the
@@ -233,12 +234,13 @@ Do not relitigate these without an explicit decision to reopen them:
 
 A **ranking system** *and* a security fix to `/ots`, specified in
 `knowledge/PRD.v4.final.md`. **Fully decided as of 2026-07-31** — nothing is
-open for exploration. **In build:** RFC-011 (ranking schema) and RFC-012
+open for exploration. **In build:** RFC-011 (ranking schema), RFC-012
 (points engine & sync freeze, including the hosted `challonge-sync` deploy)
-are both ✅ complete as of 2026-08-17; RFC-013 (identity binding & `/ots`
-refactor) and RFC-014 (ranking read commands & release) remain. Read **§31.7**
-(the `/ots` refactor) first, then **§37** (the locked-decision table).
-Reopening a §37 decision is a scope change, not a judgement call.
+and RFC-013 (identity binding & `/ots` refactor — `/ots` now takes no
+argument in production, verified in-guild and deployed 2026-08-18) are all
+✅ complete; RFC-014 (ranking read commands & release) remains. Read
+**§31.7** (the `/ots` refactor) first, then **§37** (the locked-decision
+table). Reopening a §37 decision is a scope change, not a judgement call.
 
 > ⚠️ **v4.0 is a breaking change to `/ots`, not an additive release.**
 > `/ots` loses its argument and infers the caller from a bound Discord profile.
