@@ -3,9 +3,12 @@
 **Product:** discord-ots-bot
 **Version:** 4.0
 **Date:** 2026-07-31
-**Status:** ✅ **Specified and decided. Ready for RFC-011.** No RFC written, no
-code exists. Every decision in this document is locked for build; reopening one
-is a deliberate scope change, not a judgement call.
+**Status:** 🔶 **In build.** RFC-011 (ranking schema) and RFC-012 (points
+engine & sync freeze) are both ✅ complete and live — RFC-012's
+`challonge-sync` deploy to the hosted Supabase project and a live production
+trigger were confirmed 2026-08-17. Ready for RFC-013 (identity binding &
+`/ots` refactor). Every decision in this document is locked for build;
+reopening one is a deliberate scope change, not a judgement call.
 **Target release:** no date set (see §35).
 
 **Relationship to other documents.** This is the authoritative specification for

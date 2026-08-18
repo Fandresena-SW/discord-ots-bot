@@ -670,6 +670,19 @@ covering a tie and a gap so step 6 and F51 can be exercised end-to-end locally.
 
 ## Completion record
 
+**Status (Round 4, 2026-08-17): ✅ COMPLETE.** `supabase functions deploy
+challonge-sync` shipped the function to the actual hosted Supabase project
+(`qvgnstyucqyhkluskcdc`), and a live trigger against a real, already-linked,
+finished production tournament (`tournament_id: 3`, "Open Swiss 2",
+Challonge id `18251698`) confirmed it: `{"status":"ok",
+"participants_synced":14,"matches_synced":35,"freeze":{"status":"no_season",
+"detail":"tournament has no season_id set"}}`. The `no_season` freeze outcome
+is the correct, expected fail-soft result (F55) for this tournament — it
+predates RFC-011's `season_id` column and was never assigned one — not an
+error. This closes the one remaining item from Round 3: the deployed
+function has now been triggered live against production, not just verified
+against a local stack. See the Round 4 entry below for full detail.
+
 **Status (Round 3, 2026-08-16): the staged live group-stage walkthrough has
 run, against a real Challonge tournament, synced through the organizer's
 local Supabase stack.** F68 — the highest-risk item in v4.0 and this RFC's
@@ -1019,3 +1032,51 @@ RFC-013 may treat the **algorithm** as live-verified, but the first live
 trigger against production is still a separate, unperformed step — and is
 the point at which `CLAUDE.md`'s four-place release-status update (RFC's
 Completion record, `RFCS.md`, `PRD.md`, `CLAUDE.md`) actually applies.
+
+---
+
+### Round 4 (2026-08-17) — Hosted deploy and live production trigger
+
+**What this round closes:** the single item Round 3 left outstanding —
+deploying the already-algorithm-verified function to the actual hosted
+Supabase project and confirming it with a real trigger there.
+
+**Steps performed:**
+1. Confirmed the repo was already linked to the correct hosted project
+   (`supabase projects list` → `qvgnstyucqyhkluskcdc`, `discord-ots-bot`,
+   `linked: true`) and that both required secrets were already provisioned
+   (`supabase secrets list` → `CHALLONGE_API_KEY`, `CHALLONGE_SYNC_SECRET`,
+   set 2026-07-20 — pre-existing, not newly created this round).
+2. `supabase functions deploy challonge-sync` — succeeded:
+   `{"project_ref":"qvgnstyucqyhkluskcdc","functions":["challonge-sync"],
+   "dashboard_url":"...","message":"Deployed Functions."}`.
+3. Queried the live `tournaments` table (read-only, via the bot's own
+   `SUPABASE_URL`/`SUPABASE_SERVICE_KEY`) for real, already Challonge-linked
+   tournaments safe to re-sync as a verification target — found two:
+   id `3` ("Open Swiss 2", Challonge `18251698`) and id `4` ("Online
+   Tournament Brawl", Challonge `18334344`), both `is_active: false`
+   (finished v3.0-era events). Re-syncing either is a pure upsert, per the
+   locked "upsert never append" decision — non-destructive.
+4. The organizer ran the trigger curl against tournament `3` with the real
+   `CHALLONGE_SYNC_SECRET` (never seen or handled by the assistant) and
+   reported the response:
+   ```json
+   {"status":"ok","participants_synced":14,"matches_synced":35,
+    "freeze":{"status":"no_season","detail":"tournament has no season_id set"}}
+   ```
+   `200 ok`, correct participant/match counts, and `freeze.status:
+   "no_season"` is the documented F55 fail-soft outcome for a tournament with
+   no `season_id` — expected here since tournament 3 predates RFC-011.
+
+**Verification performed (Round 4)**
+- `supabase functions deploy challonge-sync` — clean deploy, no errors.
+- Live HTTP trigger against the hosted project — `200`, correct sync counts,
+  correct (and expected) freeze outcome.
+- No code, test, or schema changes this round — deployment and live-trigger
+  verification only.
+
+**Deviations:** none. This round performed exactly the two steps Round 3
+flagged as outstanding, nothing else.
+
+**RFC-012 is now ✅ complete.** All four release-status trackers (this
+record, `RFCS.md`, `PRD.md`, `CLAUDE.md`) are updated in this same pass.
