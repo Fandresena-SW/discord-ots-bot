@@ -1,0 +1,43 @@
+# discord-ots-bot overlay on top of upstream's self-hosted Supabase compose
+# (pinned in /opt/supabase/.supabase-version) and its `caddy` overlay.
+# RFC-015. Layered via COMPOSE_FILE in /opt/supabase/.env:
+#   docker-compose.yml:docker-compose.caddy.yml:ots/docker-compose.ots.yml
+#
+# Paths below are relative to /opt/supabase (the project directory).
+
+services:
+  # --- Services this project does not use (RFC-015 §3.2) -----------------
+  # `profiles` keeps them defined but never started. Nothing remaining
+  # depends on them; the gateway just 503s their routes, and Caddy blocks
+  # those paths from the internet anyway.
+  auth:
+    profiles: ["unused"]
+  realtime:
+    profiles: ["unused"]
+  storage:
+    profiles: ["unused"]
+  imgproxy:
+    profiles: ["unused"]
+  # Supavisor is also the only thing that would publish Postgres' port.
+  supavisor:
+    profiles: ["unused"]
+
+  # --- Gateway: loopback only ---------------------------------------------
+  # The caddy overlay removes the gateway's host port (Caddy reaches it over
+  # the compose network). bot.py needs it on loopback only. Docker bypasses
+  # ufw, so this must stay bound to 127.0.0.1 — never "8000:8000".
+  api-gw:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+
+  # --- Edge Function secrets (set in /opt/supabase/.env, never committed) --
+  functions:
+    environment:
+      CHALLONGE_API_KEY: ${CHALLONGE_API_KEY:-}
+      CHALLONGE_SYNC_SECRET: ${CHALLONGE_SYNC_SECRET:-}
+
+  # --- Caddy: use our allow-list Caddyfile instead of upstream's ----------
+  # Same container target as upstream's mount, so this replaces it.
+  caddy:
+    volumes:
+      - ./ots/caddy:/etc/caddy:ro

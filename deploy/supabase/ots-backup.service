@@ -1,0 +1,8 @@
+[Unit]
+Description=Nightly pg_dump of the self-hosted Supabase database (RFC-015)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/supabase/ots/backup.sh

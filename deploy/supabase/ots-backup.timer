@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Supabase backup nightly (RFC-015)
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

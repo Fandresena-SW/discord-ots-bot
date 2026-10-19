@@ -1,0 +1,35 @@
+# Public edge for the self-hosted Supabase stack (RFC-015 §3.1).
+#
+# An ALLOW-LIST, unlike upstream's Caddyfile (which proxies /rest/v1,
+# /auth/v1, ... to the internet). The bot talks to the gateway over
+# loopback, so nothing on the Supabase API surface needs to be public except
+# the organizer's challonge-sync trigger.
+
+{$PROXY_DOMAIN} {
+    # The organizer's `curl` trigger. The function authenticates itself with
+    # the x-challonge-sync-secret header (RFC-008 §3.2); there is no JWT.
+    @sync {
+        path /functions/v1/challonge-sync
+        method POST
+    }
+    handle @sync {
+        reverse_proxy api-gw:8000
+    }
+
+    # The rest of the Supabase API surface is closed to the internet.
+    @api path /auth/v1/* /rest/v1/* /graphql/v1 /realtime/v1/* /storage/v1/* /functions/v1/* /mcp /sso/* /.well-known/*
+    handle @api {
+        respond "Not found" 404
+    }
+
+    # Everything else is Studio, behind basic auth (on top of the gateway's own).
+    handle {
+        basic_auth {
+            # PROXY_AUTH_PASSWORD is replaced with its bcrypt hash at startup
+            {$PROXY_AUTH_USERNAME} {$PROXY_AUTH_PASSWORD}
+        }
+        reverse_proxy studio:3000
+    }
+
+    header -server
+}
