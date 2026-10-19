@@ -361,8 +361,8 @@ start and run fine without them. Resident memory ~1.2 GiB on a 7.8 GiB, 4 vCPU,
 | 2 | Valid cert; `/rest/*` blocked; Studio auth | ✅ cert verifies, `/rest/v1`, `/auth/v1`, other function paths → 404, Studio → 401 without auth |
 | 3 | Data parity + invariants | ✅ per-table row counts **and content checksums** identical on all 5 non-empty tables (3 tables empty on both sides); 2 passes (rehearsal + cutover). Schema diff vs hosted: only a column's *position*. `verification.sql` was not run. |
 | 4 | `challonge-sync` 200 via public URL, no `Authorization` | ✅ tournament 4: 200, 8 participants, 14 matches, writes confirmed on self-hosted only (pg_stat counters) |
-| 5 | `/ots`, `/ots-organizer`, `/link-organizer` in-guild | ⚠️ `/ots` and `/ots-organizer` ✅; **`/link-organizer` not yet run in-guild.** Write path verified at the database layer (service_role insert + link, rolled back). |
-| 6 | Survives a VPS reboot | ⏳ **not tested** — units are enabled and containers `restart: unless-stopped`, but no reboot was done |
+| 5 | `/ots`, `/ots-organizer`, `/link-organizer` in-guild | ⚠️ `/ots` and `/ots-organizer` ✅. `/link-organizer` was run but returned "Aucun tournoi actif" (no active tournament), so it exercised the **read** path only; the **write** path through the bot is still unexercised until a tournament is active. Database-level write path verified (service_role insert + link, rolled back). |
+| 6 | Survives a VPS reboot | ✅ 2026-10-19: rebooted; back in ~44 s; docker, bot, backup timer, swap and ufw returned unaided; all 7 containers up (6 healthy + caddy, which has no healthcheck); bot reconnected to the gateway; only 22/80/443 public; data intact; function and Studio auth unchanged. Note: the bot unit orders only `After=network-online.target`, so it started a few seconds before the DB was healthy — `/ots` in that window fails soft ("unavailable") and recovers within a minute. |
 | 7 | Backup ran, captured by snapshot, **restored** | ⚠️ backup ✅, restore drill ✅ (scratch DB identical to live, 4 ledger rows). **Provider snapshot cadence/retention and that it contains `/var/backups/supabase` are still unverified.** |
 | 8 | Hosted untouched; 4 trackers updated | ✅ hosted read-only throughout; trackers updated this date |
 
@@ -373,7 +373,8 @@ start and run fine without them. Resident memory ~1.2 GiB on a 7.8 GiB, 4 vCPU,
 - `pg_restore` of our archive into a fresh DB needs `--clean --if-exists`.
 - Docker bypasses `ufw`; every published port must be `127.0.0.1:`-bound.
 
-**Still to do before marking ✅ Complete:** run `/link-organizer` in-guild;
-reboot test; verify the provider snapshot; end of soak (2026-10-26) and the
+**Still to do before marking ✅ Complete:** exercise `/link-organizer` end to end
+once a tournament is active (or accept the database-level check); verify the
+provider snapshot; end of soak (2026-10-26) and the
 decommission decision for hosted; delete `/root/mig` (holds data dumps and the
 hosted `.env` backup).
