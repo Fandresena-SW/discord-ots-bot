@@ -374,6 +374,9 @@ that matter:
   `sb_secret_…` key; the bot and the function send their key as both `apikey`
   and `Bearer`, which the legacy JWT satisfies with no code change.)
 - `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD` — Studio and Caddy basic auth.
+- `STUDIO_DEFAULT_PROJECT` — the project name Studio displays (`discord-ots-bot`).
+  Self-hosted Studio has no UI to rename it; edit this and run
+  `docker compose up -d studio`.
 - `CHALLONGE_API_KEY`, `CHALLONGE_SYNC_SECRET` — passed to the `functions`
   container by the overlay. There is no `supabase secrets set` on self-hosted.
   After editing: `cd /opt/supabase && docker compose up -d functions`.
