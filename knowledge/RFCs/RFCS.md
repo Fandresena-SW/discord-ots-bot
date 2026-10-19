@@ -289,6 +289,24 @@ Step 0 (the live Challonge `final_rank` verification, F54/F74) completed
 
 ---
 
+## Infrastructure — Self-hosted Supabase (RFC-015)
+
+An operational RFC outside the v4.0 feature chain: move the database from the
+hosted Supabase project to a self-hosted stack on the production VPS. No
+`F`-numbered feature and no expected `bot.py` change; independent of RFC-014
+(depends only on RFC-001–013's schema).
+
+| # | RFC | Complexity | Status |
+|---|-----|-----------|--------|
+| **015** | [Self-Hosted Supabase on the Production VPS](RFC-015-Self-Hosted-Supabase.md) | Medium–High | 📝 Draft — proposed 2026-10-19 |
+
+Open questions resolved 2026-10-19: backups rely on the VPS provider's
+auto-backups plus a nightly `pg_dump`; a new `deploy/` folder is approved; the
+hosted project soaks for 7 days after cutover. VPS capacity is confirmed
+sufficient (7.8 GiB RAM, 4 vCPU, 94 GB free). Implementation not started.
+
+---
+
 ## Dependency table
 
 | RFC | Depends on (predecessors) | Enables (successors) |
