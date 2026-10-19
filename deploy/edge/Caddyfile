@@ -1,0 +1,3 @@
+# Shared edge (RFC-016). Site blocks live in sites/*.caddy — one file per
+# project — so adding or changing one project cannot break another's file.
+import /etc/caddy/sites/*.caddy

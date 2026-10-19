@@ -8,6 +8,8 @@
   migrates), does **not** depend on RFC-014 and may land before or after it.
   It adds no `F`-numbered feature.
 - **Complexity:** Medium–High (operational, not code-heavy)
+- **Later change:** RFC-016 (2026-10-19) moved the public Caddy out of this stack into a
+  shared `/opt/edge`; §3.1/§4 below describe the original, in-stack Caddy.
 - **Features covered:** — (platform change; no user-visible behavior)
 - **Grounding:** `knowledge/DEPLOYMENT.md` (VPS move, 2026-10-19),
   `knowledge/RUNBOOK.md` §0/§8, `supabase/config.toml`,

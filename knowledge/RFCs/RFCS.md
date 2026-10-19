@@ -289,7 +289,7 @@ Step 0 (the live Challonge `final_rank` verification, F54/F74) completed
 
 ---
 
-## Infrastructure — Self-hosted Supabase (RFC-015)
+## Infrastructure — Self-hosted Supabase (RFC-015, RFC-016)
 
 An operational RFC outside the v4.0 feature chain: move the database from the
 hosted Supabase project to a self-hosted stack on the production VPS. No
@@ -299,6 +299,7 @@ hosted Supabase project to a self-hosted stack on the production VPS. No
 | # | RFC | Complexity | Status |
 |---|-----|-----------|--------|
 | **015** | [Self-Hosted Supabase on the Production VPS](RFC-015-Self-Hosted-Supabase.md) | Medium–High | 🚧 Cut over 2026-10-19; soak until 2026-10-26 — reboot test ✅; `/link-organizer` write path (needs an active tournament) and provider-snapshot check still open |
+| **016** | [Shared Public Edge for Multiple Self-Hosted Supabase Stacks](RFC-016-Shared-Edge-For-Multiple-Supabase-Stacks.md) | Medium | 🚧 Implemented 2026-10-19 (~4 s public gap, cert preserved); edge reboot test and the first second-project join still open |
 
 Open questions resolved 2026-10-19: backups rely on the VPS provider's
 auto-backups plus a nightly `pg_dump`; a new `deploy/` folder is approved; the

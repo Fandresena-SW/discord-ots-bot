@@ -1,0 +1,56 @@
+# Shared public edge for every self-hosted Supabase stack on this VPS (RFC-016).
+#
+# ONE Caddy owns ports 80/443 for the whole box. It is its own compose project
+# (/opt/edge) so no Supabase stack's restart, upgrade or teardown can take
+# another project's public URL down. Each stack's gateway and Studio join the
+# external Docker network `edge`; Caddy reaches them BY CONTAINER NAME.
+#
+# Never address an upstream by SERVICE name (api-gw, studio) here: Docker adds
+# the service name as an alias on every network a container joins, so two
+# stacks on `edge` would both answer to `studio`. Container names are unique.
+#
+# Per-site config lives in sites/*.caddy (one file per project), imported by
+# the Caddyfile. Create the network once:  docker network create edge
+
+name: edge
+
+services:
+  caddy:
+    container_name: edge-caddy
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    networks:
+      - edge
+    # Site files read their own variables (see env.edge.example). Basic-auth
+    # passwords are hashed at startup so .env holds plaintext only on the host.
+    env_file: .env
+    command:
+      - /bin/sh
+      - -c
+      - |
+        OTS_PROXY_AUTH_PASSWORD=$$(caddy hash-password --plaintext "$$OTS_PROXY_AUTH_PASSWORD") && \
+        caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+networks:
+  edge:
+    external: true
+
+volumes:
+  # Reuse the volumes the first stack's Caddy already filled, so the existing
+  # Let's Encrypt certificate is kept and NOT re-requested (sslip.io shares
+  # Let's Encrypt's per-domain rate limits with everyone — see RFC-016).
+  caddy_data:
+    external: true
+    name: supabase_caddy_data
+  caddy_config:
+    external: true
+    name: supabase_caddy_config

@@ -1,0 +1,35 @@
+# discord-ots-bot's Supabase stack (RFC-015, moved behind the shared edge by
+# RFC-016). Same ALLOW-LIST as before; only the upstream names changed, from
+# service names to container names (see docker-compose.yml for why).
+#
+# The bot talks to the gateway over loopback, so nothing on the Supabase API
+# surface needs to be public except the organizer's challonge-sync trigger.
+
+{$OTS_DOMAIN} {
+    # The organizer's `curl` trigger. The function authenticates itself with the
+    # x-challonge-sync-secret header (RFC-008 §3.2); there is no JWT.
+    @sync {
+        path /functions/v1/challonge-sync
+        method POST
+    }
+    handle @sync {
+        reverse_proxy supabase-envoy:8000
+    }
+
+    # The rest of the Supabase API surface is closed to the internet.
+    @api path /auth/v1/* /rest/v1/* /graphql/v1 /realtime/v1/* /storage/v1/* /functions/v1/* /mcp /sso/* /.well-known/*
+    handle @api {
+        respond "Not found" 404
+    }
+
+    # Everything else is Studio, behind basic auth (on top of the gateway's own).
+    handle {
+        basic_auth {
+            # OTS_PROXY_AUTH_PASSWORD is replaced with its bcrypt hash at startup
+            {$OTS_PROXY_AUTH_USERNAME} {$OTS_PROXY_AUTH_PASSWORD}
+        }
+        reverse_proxy supabase-studio:3000
+    }
+
+    header -server
+}

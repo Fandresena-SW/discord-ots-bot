@@ -336,26 +336,58 @@ upstream's compose is **not** vendored — it is fetched by upstream's own
 | Piece | Where |
 |---|---|
 | Project dir (compose, `.env`, volumes) | `/opt/supabase` |
-| Our overlay, Caddyfile, scripts | `/opt/supabase/ots/` (copied from `deploy/supabase/`) |
+| Our overlay and scripts | `/opt/supabase/ots/` (copied from `deploy/supabase/`) |
+| **Shared public edge** (Caddy) | `/opt/edge` (from `deploy/edge/`) — its own compose project, see below |
 | Nightly backups | `/var/backups/supabase/` |
 | Function sources | `/opt/supabase/volumes/functions/challonge-sync/` |
 
-Seven containers: `db` (Postgres 17), `rest` (PostgREST), `meta`, `studio`,
-`api-gw` (**Envoy**, upstream's default gateway — not Kong), `functions`
-(edge runtime) and `caddy`. Auth, Realtime, Storage, imgproxy and the pooler
+Six containers in this stack: `db` (Postgres 17), `rest` (PostgREST), `meta`,
+`studio`, `api-gw` (**Envoy**, upstream's default gateway — not Kong) and
+`functions` (edge runtime). Auth, Realtime, Storage, imgproxy and the pooler
 are disabled in `docker-compose.ots.yml` (they sit under an unused
 `profiles` entry). `COMPOSE_FILE` in `/opt/supabase/.env` layers
-`docker-compose.yml : docker-compose.caddy.yml : ots/docker-compose.ots.yml`.
+`docker-compose.yml : ots/docker-compose.ots.yml` — **no** upstream `caddy`
+overlay since RFC-016; the public edge is a separate project (below). The
+seventh container, `edge-caddy`, belongs to `/opt/edge`.
+
+### Shared edge (RFC-016)
+
+One Caddy owns ports 80/443 for the whole VPS, as its own compose project in
+`/opt/edge` (`deploy/edge/`), so no Supabase stack's restart, upgrade or teardown
+can take another project's public URL down. It sits on the external Docker network
+**`edge`** (create once: `docker network create edge`). A stack publishes itself by
+joining `edge` with its **gateway and Studio only** — `db`, `rest`, `meta` and
+`functions` stay on the stack's private network.
+
+- **One file per project:** `/opt/edge/sites/<project>.caddy`, imported by the
+  Caddyfile. This stack's is `sites/ots.caddy`. Variables for a site file live in
+  `/opt/edge/.env` under a per-project prefix (`OTS_…`); `.env` is `chmod 600`.
+- **Upstreams are addressed by CONTAINER name, never service name.** Docker adds the
+  service name (`studio`, `api-gw`) as an alias on every network a container joins,
+  so two stacks on `edge` would both answer to `studio`. This stack is
+  `supabase-envoy:8000` and `supabase-studio:3000`; the next project must use its own
+  unique `container_name`s (upstream hard-codes `supabase-*`, so a second stack must
+  override them all, and set its own `COMPOSE_PROJECT_NAME`).
+- **Certificates are kept:** the edge compose reuses the existing named volumes
+  `supabase_caddy_data` / `supabase_caddy_config` (declared `external`), so the Let's
+  Encrypt certificate was **not** re-requested at the swap — `sslip.io` is not on the
+  Public Suffix List and shares Let's Encrypt's per-domain rate limits with every other
+  user. Do not delete those volumes.
+- Operate it: `cd /opt/edge && docker compose ps | logs | up -d`. Validate a Caddyfile
+  change before applying:
+  `docker run --rm --env-file .env -v /opt/edge/Caddyfile:/etc/caddy/Caddyfile:ro -v /opt/edge/sites:/etc/caddy/sites:ro caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`.
+  A broken site file breaks the **whole** edge on reload, so validate first.
+- Adding a project: see the handover at `~/.claude/handovers/supabase-second-project-handover.md`.
 
 ### Exposure (what is and is not public)
 
-- Public: **22, 80, 443** only. Caddy serves `https://161-97-171-179.sslip.io`
+- Public: **22, 80, 443** only. The shared Caddy serves `https://161-97-171-179.sslip.io`
   (wildcard DNS to the VPS IP, real Let's Encrypt certificate).
 - The gateway is published on **`127.0.0.1:8000` only**; that is the bot's
   `SUPABASE_URL`. **Docker bypasses `ufw`** — a port published as
   `"5432:5432"` would be open to the internet whatever `ufw` says, so every
   published port must carry `127.0.0.1:`.
-- Caddy (`deploy/supabase/caddy/Caddyfile`) is an **allow-list**:
+- This stack's site file (`/opt/edge/sites/ots.caddy`, from `deploy/edge/sites/ots.caddy`) is an **allow-list**:
   `POST /functions/v1/challonge-sync` is proxied (the function authenticates
   itself with `x-challonge-sync-secret`); `/rest`, `/auth`, `/storage`,
   `/realtime`, every other `/functions/v1/*` path and `/mcp` return 404;
@@ -373,7 +405,9 @@ that matter:
   `SUPABASE_SERVICE_KEY` is this value. (Upstream now also issues an opaque
   `sb_secret_…` key; the bot and the function send their key as both `apikey`
   and `Bearer`, which the legacy JWT satisfies with no code change.)
-- `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD` — Studio and Caddy basic auth.
+- `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD` — Studio and Caddy basic auth. The
+  edge reads its own copy as `OTS_PROXY_AUTH_USERNAME` / `OTS_PROXY_AUTH_PASSWORD`
+  in `/opt/edge/.env`; **change both together**.
 - `STUDIO_DEFAULT_PROJECT` — the project name Studio displays (`discord-ots-bot`).
   Self-hosted Studio has no UI to rename it; edit this and run
   `docker compose up -d studio`.
@@ -454,7 +488,8 @@ made afterwards do not exist on hosted.
 
 ```bash
 cd /opt/supabase
-docker compose ps                       # all seven should be healthy
+docker compose ps                       # all six should be healthy
+(cd /opt/edge && docker compose ps)     # the shared Caddy
 sh run.sh logs <service>                # follow one service
 systemctl list-timers ots-backup.timer  # next backup
 ```

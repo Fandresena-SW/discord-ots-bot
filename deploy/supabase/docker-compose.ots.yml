@@ -1,7 +1,10 @@
 # discord-ots-bot overlay on top of upstream's self-hosted Supabase compose
-# (pinned in /opt/supabase/.supabase-version) and its `caddy` overlay.
-# RFC-015. Layered via COMPOSE_FILE in /opt/supabase/.env:
-#   docker-compose.yml:docker-compose.caddy.yml:ots/docker-compose.ots.yml
+# (pinned in /opt/supabase/.supabase-version). RFC-015, edge moved out by RFC-016.
+# Layered via COMPOSE_FILE in /opt/supabase/.env:
+#   docker-compose.yml:ots/docker-compose.ots.yml
+#
+# There is deliberately NO upstream `caddy` overlay any more: the public edge is
+# the shared, standalone Caddy in /opt/edge (deploy/edge/).
 #
 # Paths below are relative to /opt/supabase (the project directory).
 
@@ -22,13 +25,21 @@ services:
   supavisor:
     profiles: ["unused"]
 
-  # --- Gateway: loopback only ---------------------------------------------
-  # The caddy overlay removes the gateway's host port (Caddy reaches it over
-  # the compose network). bot.py needs it on loopback only. Docker bypasses
-  # ufw, so this must stay bound to 127.0.0.1 — never "8000:8000".
+  # --- Gateway: loopback only + the shared edge -----------------------------
+  # Upstream publishes the gateway on all interfaces. bot.py needs it on loopback
+  # only. Docker bypasses ufw, so this must stay bound to 127.0.0.1 — never
+  # "8000:8000". The gateway and Studio also join the external `edge` network so
+  # the shared Caddy can reach them (by container name — see deploy/edge).
   api-gw:
     ports: !override
       - "127.0.0.1:8000:8000"
+    networks:
+      default: {}
+      edge: {}
+  studio:
+    networks:
+      default: {}
+      edge: {}
 
   # --- Edge Function secrets (set in /opt/supabase/.env, never committed) --
   functions:
@@ -36,8 +47,6 @@ services:
       CHALLONGE_API_KEY: ${CHALLONGE_API_KEY:-}
       CHALLONGE_SYNC_SECRET: ${CHALLONGE_SYNC_SECRET:-}
 
-  # --- Caddy: use our allow-list Caddyfile instead of upstream's ----------
-  # Same container target as upstream's mount, so this replaces it.
-  caddy:
-    volumes:
-      - ./ots/caddy:/etc/caddy:ro
+networks:
+  edge:
+    external: true
