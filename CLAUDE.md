@@ -55,7 +55,7 @@ reference doc there (do not scatter them across the repo root).
 - `knowledge/E2E-CHECKLIST-v3.md` — the release gate for current behavior, 9
   scenarios, 9/9 `PASS`, signed off 2026-07-31. French.
 - `knowledge/DEPLOYMENT.md` — how the bot is actually deployed and run in
-  production (Oracle Cloud VM, systemd service, redeploy steps, troubleshooting
+  production (VPS, systemd service, redeploy steps, troubleshooting
   log); **§12 covers deploying the `challonge-sync` Edge Function**, which is a
   completely separate deploy path from the bot.
 - `.claude/RULES.md` — development guardrails / locked-decision rules (kept in
@@ -110,7 +110,7 @@ system Python — use the venv where `requirements.txt` is installed.
 
 `Procfile` declares the process type (`worker: python3 bot.py`) for a
 Heroku/Railway/Render-style PaaS, but **production actually runs on a
-self-managed Oracle Cloud VM as a systemd service** — see
+self-managed VPS (moved from Oracle Cloud on 2026-10-19) as a systemd service** — see
 `knowledge/DEPLOYMENT.md` for the full setup, redeploy, and troubleshooting
 steps.
 

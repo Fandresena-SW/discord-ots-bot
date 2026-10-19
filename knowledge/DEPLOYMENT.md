@@ -1,130 +1,110 @@
-# DEPLOYMENT — Running the bot on a cloud VM (Oracle Cloud Free Tier)
+# DEPLOYMENT — Running the bot on a VPS (Contabo-style root VPS, systemd)
 
-- **Status:** Production deployment documented (2026-07-18); §12 (Challonge
-  sync Edge Function deploy) added by RFC-010.
-- **Host in use:** Oracle Cloud Infrastructure (OCI) **Always Free** compute
-  instance, Ubuntu, region `eu-paris-1`.
-- **Process model:** the app is started as a **systemd service** on the VM
-  (not the Heroku/Railway/Render-style `Procfile` worker described in
-  `CLAUDE.md`'s "Run locally" section — the `Procfile` is kept in the repo as
-  a portable process-type declaration in case a PaaS target is used later, but
-  the current production deployment is this self-managed VM). The v3.0
-  Challonge sync Edge Function (§12) is a **separate deployment target**
-  (Supabase itself, not the OCI VM) — see §12 for its own deploy path.
+- **Status:** Production moved to a new VPS on 2026-10-19 (previously Oracle
+  Cloud, now retired). §12 (Challonge sync Edge Function deploy) added by
+  RFC-010 and is unaffected by the move.
+- **Host in use:** a plain Ubuntu VPS, provisioned with a `root` login.
+  Hostname `vmi3677843`, IP `161.97.171.179`.
+- **Process model:** the app runs as a **systemd service**
+  (`discord-ots-bot`) under an unprivileged user, **`botuser`**, with the repo
+  at `/home/botuser/discord-ots-bot`. (The `Procfile` is kept in the repo as a
+  portable process-type declaration for a possible PaaS target; it is not
+  what production uses.) The Challonge sync Edge Function (§12) is a
+  **separate deployment target** (Supabase itself, not the VPS).
 
-This doc captures the exact steps used to stand up the bot on OCI, so a
-redeploy, a VM rebuild, or a move to a fresh instance doesn't have to
-rediscover the same pitfalls (public IP attachment, the Python-version trap
-on older Ubuntu images, the console-vs-SSH host-key confusion).
+This doc captures the exact steps used to stand up the bot, so a redeploy, a
+VPS rebuild, or another move doesn't have to rediscover them. The previous
+Oracle Cloud setup's pitfalls are kept in §11 for history.
 
 ---
 
-## 1. Why Oracle Cloud
+## 1. Why a self-managed VPS
 
 The bot is a single lightweight background process (one persistent Discord
 Gateway WebSocket + outbound HTTPS to Supabase) with **no inbound traffic**
-other than the operator's own SSH. Railway's free tier is trial-only; OCI's
-**Always Free** tier includes a real compute instance for free indefinitely,
-which is a better fit for a process that just needs to stay up. See
-`.claude/RULES.md` / `knowledge/RFCs/RFC-006-Reliability-And-Release.md` for
-the reliability story once deployed (pre-flight checklist, break-glass,
-Supabase free-tier pause risk) — this doc only covers getting the process
-itself running.
+other than the operator's own SSH. A small always-on VPS is a better fit than
+a trial-only PaaS. See `.claude/RULES.md` /
+`knowledge/RFCs/RFC-006-Reliability-And-Release.md` for the reliability story
+(pre-flight checklist, break-glass, Supabase free-tier pause risk) — this doc
+only covers getting the process running.
 
 ---
 
-## 2. Provision the instance
+## 2. Provision the VPS
 
-1. OCI Console → **Compute → Instances → Create instance**.
-2. **Image: use Ubuntu 22.04 or 24.04 LTS**, not 20.04 ("focal"). 20.04 ships
-   Python 3.8 as the system `python3`, which cannot import `bot.py` as-written
-   without the compatibility shim described in §7 below — 22.04+ ships Python
-   3.10+ and needs no workaround. (Oracle's "Autonomous Linux" image also
-   works but has less predictable package-manager behavior than plain Ubuntu;
-   prefer stock Ubuntu.)
-3. Shape: any **Always Free**-eligible shape (e.g. `VM.Standard.A1.Flex` or
-   the free `VM.Standard.E2.1.Micro`) is sufficient for this workload.
-4. Keep the generated SSH key pair — you'll need it for every future
-   connection (`ssh -i <key> ubuntu@<public-ip>`).
+Any Ubuntu **22.04 or 24.04 LTS** image works (Python 3.10+ is required by
+the `str | None` hints in `bot.py`; 20.04's Python 3.8 is not enough — see
+§7). The provider hands over a public IP and a `root` credential; no cloud
+console networking steps are needed.
 
 ---
 
-## 3. Attach a public IP
-
-A freshly created instance often has **no public IP** yet (shows `-` on the
-instance's Details tab under "Public IP address").
-
-1. Reserve one: **Networking → IP Management → Reserved public IPs → Reserve
-   public IP address**. Reserved (not ephemeral) so it survives instance
-   stop/start.
-2. Attaching it from the **reserved IP's own page** does not expose an
-   "Attach" action reliably in every console version. The dependable path is
-   from the **instance side**: instance → **Networking** tab → primary VNIC
-   → the **Public IPv4 address** row → its edit/pencil icon → select the
-   existing reserved IP (or create+attach in one step if offered there).
-3. Confirm: the instance's **Details** tab now shows the public IP instead
-   of `-`.
-4. Make sure the subnet's **Security List** (or attached NSG) allows inbound
-   TCP/22 (SSH) — default OCI "quick create" VCNs from the instance wizard
-   usually already do.
-
----
-
-## 4. Connect
+## 3. Connect
 
 ```bash
-ssh -i "/path/to/your-key.key" ubuntu@<public-ip>
+ssh root@161.97.171.179
 ```
 
-**Do not confuse this with the OCI serial console connection** (the
-`ocid1.instanceconsoleconnection...` / `instance-console.<region>.oci...`
-tunnel command shown under Instance Access → console connection). That path
-is for troubleshooting an **unresponsive** instance via a VNC-over-SSH tunnel
-to port 5900, and its older host requires `-o HostKeyAlgorithms=+ssh-rsa` on
-modern OpenSSH clients to negotiate at all. Normal SSH directly to the
-instance's public IP (above) does not need that flag.
+Optionally install your key so you aren't prompted for the password:
+`ssh-copy-id root@161.97.171.179`. Day-to-day work (deploys, logs) happens as
+`botuser`; root is only needed for the one-time setup below and the service
+unit.
 
 ---
 
-## 5. Install dependencies and clone the repo
+## 4. Base system setup (as root, once)
 
 ```bash
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv git
+apt update && apt upgrade -y
+apt install -y python3 python3-venv python3-pip git ufw
 
+# Unprivileged service user. --disabled-password means it has NO password,
+# so it cannot use sudo unless a sudoers rule grants it (see §9).
+adduser --disabled-password --gecos "" botuser
+
+# The bot only makes outbound connections; only SSH needs to be open.
+ufw allow OpenSSH && ufw --force enable
+```
+
+---
+
+## 5. Clone the repo and install dependencies (as `botuser`)
+
+```bash
+su - botuser
 git clone https://github.com/Fandresena-SW/discord-ots-bot.git
 cd discord-ots-bot
 python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-deactivate
+venv/bin/pip install -r requirements.txt
+exit
 ```
+
+If the repo is private, the clone needs credentials (a GitHub deploy key or a
+personal access token).
 
 ---
 
 ## 6. Create `.env` on the server
 
-**Never commit real secrets.** Create the file directly on the VM, not via
-git:
+**Never commit real secrets.** Copy the file from your workstation (so the
+values never pass through git or a chat), **from your own machine**:
 
 ```bash
-nano .env
+scp /path/to/discord-ots-bot/.env root@161.97.171.179:/home/botuser/discord-ots-bot/.env
 ```
 
-```
-DISCORD_TOKEN=...
-GUILD_ID=...
-SUPABASE_URL=...
-SUPABASE_SERVICE_KEY=...
-```
+Then, on the VPS as root:
 
 ```bash
-chmod 600 .env
+chown botuser:botuser /home/botuser/discord-ots-bot/.env
+chmod 600 /home/botuser/discord-ots-bot/.env
 ```
 
-See `.env.example` and `knowledge/RUNBOOK.md` §0 for where `SUPABASE_URL` /
-`SUPABASE_SERVICE_KEY` come from (Supabase Project Settings → API), and the
-warning there about using the **secret** key, never the **publishable** one.
+Required vars: `DISCORD_TOKEN`, `GUILD_ID`, `SUPABASE_URL`,
+`SUPABASE_SERVICE_KEY`, `ORGANIZER_DISCORD_ID` (the bot refuses to start
+without all five). See `.env.example` and `knowledge/RUNBOOK.md` §0 for where
+the Supabase values come from, and the warning there about using the
+**secret** key, never the **publishable** one.
 
 ---
 
@@ -133,23 +113,18 @@ warning there about using the **secret** key, never the **publishable** one.
 `bot.py` uses PEP 604 union type hints (`str | None`, etc.) in function
 signatures. These are evaluated **eagerly** on Python < 3.10, which raises
 `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'` at
-import time on an interpreter older than 3.10 (this is exactly what Ubuntu
-20.04's system Python 3.8 does).
+import time on an older interpreter.
 
 The fix committed to the repo is `from __future__ import annotations` at the
-top of `bot.py`, which makes all annotations lazy strings — never evaluated
-at runtime — so the file imports cleanly on Python 3.8+ with no behavior
-change. If you provision on 22.04+/24.04 (Python 3.10+ by default) this
-never bites, but the shim is harmless either way and means the repo isn't
-silently pinned to a specific host's Python version.
+top of `bot.py`, which makes all annotations lazy strings, so the file
+imports cleanly on Python 3.8+ with no behavior change. On 22.04+/24.04 this
+never bites, but the shim is harmless either way.
 
 ---
 
-## 8. Run as a systemd service
+## 8. Run as a systemd service (as root, once)
 
-```bash
-sudo nano /etc/systemd/system/discord-ots-bot.service
-```
+Create `/etc/systemd/system/discord-ots-bot.service`:
 
 ```ini
 [Unit]
@@ -159,9 +134,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/discord-ots-bot
-ExecStart=/home/ubuntu/discord-ots-bot/venv/bin/python3 bot.py
+User=botuser
+WorkingDirectory=/home/botuser/discord-ots-bot
+ExecStart=/home/botuser/discord-ots-bot/venv/bin/python3 bot.py
 Restart=on-failure
 RestartSec=5
 
@@ -173,48 +148,62 @@ WantedBy=multi-user.target
 `EnvironmentFile=` directive is needed — just a correct `WorkingDirectory`.
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now discord-ots-bot
-sudo systemctl status discord-ots-bot
+systemctl daemon-reload
+systemctl enable --now discord-ots-bot
+systemctl status discord-ots-bot --no-pager -l
 ```
+
+Do this **before** the first `./deploy.sh`: the script's restart step fails
+with `Unit discord-ots-bot.service not found` otherwise.
+
+**Never run two instances on the same `DISCORD_TOKEN`** (e.g. a leftover old
+host, or a local `python bot.py`): both answer every interaction. Stop the
+other one first.
 
 ---
 
 ## 9. Redeploying a code change
 
-`deploy.sh` (repo root) automates this: pulls, reinstalls dependencies into
-the venv, restarts the systemd service, and tails the logs.
+`deploy.sh` (repo root) pulls, reinstalls dependencies into the venv,
+restarts the service, and tails the logs. Run it **as `botuser`, without
+`sudo` in front** — it calls `sudo systemctl` itself, and running the whole
+script as root would make `git pull` create root-owned files.
+
+`botuser` has no password, so it needs a sudoers rule allowing exactly the
+two service commands the script runs (as root, once):
 
 ```bash
-ssh -i "/path/to/your-key.key" ubuntu@<public-ip>
-cd discord-ots-bot
-./deploy.sh
+cat > /etc/sudoers.d/botuser <<'SUDOERS'
+botuser ALL=(root) NOPASSWD: /usr/bin/systemctl restart discord-ots-bot, /usr/bin/systemctl status discord-ots-bot --no-pager -l
+SUDOERS
+chmod 440 /etc/sudoers.d/botuser
+visudo -c
 ```
 
-It assumes the service is named `discord-ots-bot` (matching §8) and that the
-venv lives at `<repo>/venv` — adjust the `SERVICE_NAME` variable at the top
-of the script if either differs on your instance. Equivalent manual steps,
-if you'd rather run them by hand:
+(If `which systemctl` prints a different path, use that path.) Then:
 
 ```bash
+ssh root@161.97.171.179
+su - botuser
 cd discord-ots-bot
-git pull
-source venv/bin/activate
-pip install -r requirements.txt
-deactivate
-sudo systemctl restart discord-ots-bot
-sudo systemctl status discord-ots-bot   # confirm "active (running)"
+./deploy.sh        # Ctrl+C to stop the log tail
 ```
+
+It assumes the service is named `discord-ots-bot` and the venv is at
+`<repo>/venv`; adjust `SERVICE_NAME` at the top of the script otherwise.
 
 ---
 
 ## 10. Monitoring & logs
 
 ```bash
-sudo systemctl status discord-ots-bot        # current state
+systemctl status discord-ots-bot --no-pager  # current state
 journalctl -u discord-ots-bot -f             # live tail
 journalctl -u discord-ots-bot -n 50          # last 50 lines
 ```
+
+(Reading the journal as `botuser` may require membership in the
+`systemd-journal` group; as root it always works.)
 
 A healthy start shows `discord.client: logging in using static token`
 followed by `discord.gateway: Shard ID None has connected to Gateway`. A
@@ -226,8 +215,16 @@ line first.
 
 ## 11. Troubleshooting log
 
-Real issues hit during the initial OCI deployment, kept here so they aren't
-rediscovered from scratch on the next VM:
+**New VPS (2026-10-19):**
+
+- **`./deploy.sh` → `Unit discord-ots-bot.service not found`** — the systemd
+  unit (§8) hadn't been created yet. Create it, then redeploy.
+- **`sudo` asks for a password as `botuser`** — the user was created with
+  `--disabled-password`, so there is none. Add the sudoers rule in §9; do not
+  run `sudo ./deploy.sh`.
+
+**Historical — the retired Oracle Cloud (OCI) deployment**, kept so the same
+pitfalls aren't rediscovered on another provider:
 
 - **`ssh: ... Unable to negotiate ... no matching host key type found. Their
   offer: ssh-rsa`** — only happens on the **serial console** tunnel command
@@ -258,14 +255,14 @@ deployment target**: a Supabase Edge Function
 (`supabase/functions/challonge-sync/`, TypeScript/Deno) that the organizer
 triggers manually via `curl` (see `knowledge/RUNBOOK.md` §8) to refresh the
 Challonge participant/match cache. This is deployed to Supabase itself, not
-to the OCI VM — `bot.py` never talks to Challonge and needs no changes to
+to the VPS — `bot.py` never talks to Challonge and needs no changes to
 support it (RULES §12).
 
 ### Prerequisites
 
 - The [Supabase CLI](https://supabase.com/docs/guides/cli) installed locally
   (or on whichever machine you deploy from — this does **not** need to be the
-  OCI VM).
+  VPS).
 - The local repo linked to the Supabase project (once per clone/machine):
   ```bash
   supabase login
@@ -296,7 +293,7 @@ supabase functions deploy challonge-sync
 ```
 
 Re-run this any time `supabase/functions/challonge-sync/*.ts` changes — there
-is no separate build step and no restart needed on the OCI side.
+is no separate build step and no restart needed on the VPS.
 
 ### Verifying a deploy
 

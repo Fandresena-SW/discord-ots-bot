@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pull the latest code and restart the bot service on the production VM.
-# Run this from an SSH session on the server (see knowledge/DEPLOYMENT.md).
+# Pull the latest code and restart the bot service on the production VPS.
+# Run as botuser (not root, no sudo prefix) from an SSH session on the server (see knowledge/DEPLOYMENT.md).
 #
 # Usage: ./deploy.sh
 
