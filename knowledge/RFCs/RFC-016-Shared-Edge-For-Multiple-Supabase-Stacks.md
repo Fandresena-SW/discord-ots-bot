@@ -1,7 +1,7 @@
 # RFC-016 — Shared Public Edge for Multiple Self-Hosted Supabase Stacks
 
-- **Status:** 🚧 **Implemented 2026-10-19**; reboot persistence of the new edge and
-  the first second-project join are still open (see Completion record)
+- **Status:** ✅ **Implemented 2026-10-19.** Reboot test waived by the owner; the first
+  second-project join is still to be exercised (see Completion record)
 - **Implementation order:** infrastructure RFC, independent of the v4.0 feature
   chain — depends on RFC-015 (the stack it re-homes), does not touch `bot.py`
 - **Complexity:** Medium (operational)
@@ -102,12 +102,18 @@ the secret and 404 "tournament not found" with it (function reachable through th
 edge); non-loopback listeners still only 22/80/443; `db` is on `supabase_default` only;
 0 errors in the edge log; bot active.
 
-**Open:**
-- **Reboot persistence of the new edge is not tested** (`restart: unless-stopped` and an
-  enabled Docker daemon should do it, but it was verified for RFC-015's topology, not
-  this one).
-- **The old `supabase-caddy` container is stopped, not removed**, kept briefly as a
-  rollback path (`docker start supabase-caddy` after `docker compose down` in
-  `/opt/edge`).
-- Nothing else has joined `edge` yet; the multi-tenant behavior (two stacks, no alias
-  confusion) is reasoned from Docker's documented behavior, **not yet exercised**.
+**Closed:**
+- **Old `supabase-caddy` container removed** (2026-10-19) after the edge had served for
+  ~18 minutes; `docker rm` without `-v`, so the `supabase_caddy_data` /
+  `supabase_caddy_config` volumes the edge depends on were left intact (verified: 2 of 2
+  present; public URL still 401 with a valid certificate afterwards). The rollback path
+  to the in-stack Caddy no longer exists as a one-command step.
+- **Reboot persistence of the new edge: not tested — waived by the owner.** `edge-caddy`
+  has `restart: unless-stopped` and the Docker daemon is enabled, which is the same
+  mechanism RFC-015's reboot test exercised for the previous topology; it was not
+  re-verified for this one.
+
+**Still open:**
+- Nothing else has joined `edge` yet; the multi-tenant behavior (two stacks on `edge`,
+  no alias confusion) is reasoned from Docker's documented behavior, **not yet
+  exercised**. The first project to join should record its result here.
