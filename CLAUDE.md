@@ -123,7 +123,11 @@ Loaded from `.env` via `python-dotenv`:
   guild in `on_ready`, so slash-command changes appear immediately for that
   server (no global-sync propagation delay).
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — the live PostgREST seam (now read
-  **and write** — see RFC-013's `_supabase_write`). The service key bypasses
+  **and write** — see RFC-013's `_supabase_write`). **Since 2026-10-19 the
+  database is self-hosted Supabase on the production VPS** (RFC-015,
+  `knowledge/DEPLOYMENT.md` §13): in production `SUPABASE_URL` is
+  `http://127.0.0.1:8000` (loopback) and the key is the stack's legacy
+  `SERVICE_ROLE_KEY`. The service key bypasses
   RLS (every table is deny-by-default with no policies), so it is
   worker-only and never committed.
 - `ORGANIZER_DISCORD_ID` (RFC-013) — the organizer's Discord user id, gating
@@ -134,8 +138,10 @@ Loaded from `.env` via `python-dotenv`:
   (`bot.py:38`) — missing/invalid config fails fast before `client.run()`, not
   on first `/ots`.
 
-**The Edge Function has its own, separate secrets** (set via `supabase secrets
-set`, *not* in `.env` — see `knowledge/DEPLOYMENT.md` §12):
+**The Edge Function has its own, separate secrets** (on the self-hosted stack:
+in `/opt/supabase/.env`, passed to the functions container — *not* the bot's
+`.env`, and no `supabase secrets set`; see `knowledge/DEPLOYMENT.md` §13. The
+hosted-era procedure is §12):
 `CHALLONGE_SYNC_SECRET` (shared secret gating the HTTP trigger),
 `CHALLONGE_API_KEY`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`. Note the
 last one is spelled differently from the bot's `SUPABASE_SERVICE_KEY`.

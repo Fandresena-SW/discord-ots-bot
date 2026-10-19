@@ -1,6 +1,8 @@
 # RFC-015 — Self-Hosted Supabase on the Production VPS
 
-- **Status:** 📝 Draft — proposed 2026-10-19, not started
+- **Status:** 🚧 **Cut over 2026-10-19; in soak until 2026-10-26** — the bot runs
+  on the self-hosted database; hosted is untouched as the fallback. Not yet
+  ✅ Complete: see the Completion record for the acceptance items still open.
 - **Implementation order:** infrastructure RFC, **independent of the v4.0
   feature chain** — depends on RFC-001…013 being complete (the schema it
   migrates), does **not** depend on RFC-014 and may land before or after it.
@@ -319,6 +321,59 @@ operational config, not application code. Approved 2026-10-19 (§7.3).
 
 ## Completion record
 
-*(empty — filled in when implemented, with: services actually omitted, VPS
-specs, deviations from §3, the soak outcome, and the date the hosted project
-was decommissioned.)*
+**Cutover: 2026-10-19.** Hosted project untouched and kept as the fallback;
+soak runs **7 days, until 2026-10-26**. Decommissioning it is a separate,
+explicit decision.
+
+**Stack as built** (upstream `self-hosted/v0.8.3`, pinned in
+`/opt/supabase/.supabase-version`): `db` (Postgres 17.6), `rest`, `meta`,
+`studio`, `api-gw` (**Envoy** — upstream's default gateway; the RFC's Kong
+wording predates that), `functions`, `caddy`. Omitted via an unused profile:
+`auth`, `realtime`, `storage`, `imgproxy`, `supavisor`. Studio and the stack
+start and run fine without them. Resident memory ~1.2 GiB on a 7.8 GiB, 4 vCPU,
+96 GB VPS; a 2 GB swapfile was added.
+
+**Deviations from §3, all recorded:**
+- **Gateway is Envoy, not Kong** (§3.1/§3.2 wording) — same role, upstream's
+  current default; Kong remains an upstream option.
+- **Provisioning used upstream's `setup.sh`** plus our overlay, not a hand-built
+  compose. `deploy/supabase/` holds only our deltas.
+- **Added migration `20261019000000_revoke_anon_authenticated_public`** (not in
+  the RFC): the self-hosted image's default ACL grants anon/authenticated full
+  privileges on new `public` tables; RLS alone kept them at `200 []`. Revoked
+  explicitly, existing and default. Applied to self-hosted only, never pushed to
+  hosted. Anon now gets `42501`.
+- **Upstream's Caddyfile publicly proxies `/rest/v1`**; replaced with an
+  allow-list (§3.1).
+- **Keys:** the bot and function use the legacy HS256 `SERVICE_ROLE_KEY`, not the
+  new opaque `sb_secret_…` key — both send it as `apikey` and `Bearer`, so no code
+  change was needed.
+- **Secrets leaked into the build session's transcript once** (key generator
+  output); every secret was regenerated before first start. Never re-run the
+  key scripts unfiltered.
+- No code change was needed in `bot.py` or `index.ts` (§3.7 held).
+
+**Acceptance (§5):**
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | Only 22/80/443 public | ✅ proven **server-side** (`ss -ltnH`: only 22/80/443 non-loopback; `iptables` DNAT only 80/443/8000, the last `-d 127.0.0.1`). A client-side port scan was unusable (ProtonVPN made every port look open). |
+| 2 | Valid cert; `/rest/*` blocked; Studio auth | ✅ cert verifies, `/rest/v1`, `/auth/v1`, other function paths → 404, Studio → 401 without auth |
+| 3 | Data parity + invariants | ✅ per-table row counts **and content checksums** identical on all 5 non-empty tables (3 tables empty on both sides); 2 passes (rehearsal + cutover). Schema diff vs hosted: only a column's *position*. `verification.sql` was not run. |
+| 4 | `challonge-sync` 200 via public URL, no `Authorization` | ✅ tournament 4: 200, 8 participants, 14 matches, writes confirmed on self-hosted only (pg_stat counters) |
+| 5 | `/ots`, `/ots-organizer`, `/link-organizer` in-guild | ⚠️ `/ots` and `/ots-organizer` ✅; **`/link-organizer` not yet run in-guild.** Write path verified at the database layer (service_role insert + link, rolled back). |
+| 6 | Survives a VPS reboot | ⏳ **not tested** — units are enabled and containers `restart: unless-stopped`, but no reboot was done |
+| 7 | Backup ran, captured by snapshot, **restored** | ⚠️ backup ✅, restore drill ✅ (scratch DB identical to live, 4 ledger rows). **Provider snapshot cadence/retention and that it contains `/var/backups/supabase` are still unverified.** |
+| 8 | Hosted untouched; 4 trackers updated | ✅ hosted read-only throughout; trackers updated this date |
+
+**Findings worth keeping:**
+- `challonge_*_cache.fetched_at` never advances on re-sync (the function's
+  `merge-duplicates` upsert never sets it) — pre-existing, also true on hosted;
+  the F36 staleness warning cannot reflect a refresh. Not fixed here.
+- `pg_restore` of our archive into a fresh DB needs `--clean --if-exists`.
+- Docker bypasses `ufw`; every published port must be `127.0.0.1:`-bound.
+
+**Still to do before marking ✅ Complete:** run `/link-organizer` in-guild;
+reboot test; verify the provider snapshot; end of soak (2026-10-26) and the
+decommission decision for hosted; delete `/root/mig` (holds data dumps and the
+hosted `.env` backup).

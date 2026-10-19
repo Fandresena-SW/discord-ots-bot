@@ -61,7 +61,31 @@ la rédaction ; en cas de divergence, `schema.sql` reste la source de vérité.
 
 ---
 
+> **Hébergement : Supabase auto-hébergé depuis le 2026-10-19 (RFC-015).**
+> La base ne tourne plus sur supabase.com mais sur le VPS de production, dans
+> un stack Docker (`knowledge/DEPLOYMENT.md` §13).
+>
+> - **Studio** : `https://161-97-171-179.sslip.io` — connexion par
+>   authentification basique (identifiant `otsadmin`). Le mot de passe est
+>   dans `/opt/supabase/.env` sur le VPS (`DASHBOARD_PASSWORD`) ; ne jamais le
+>   copier dans le dépôt ni dans un message.
+> - **Déclencheur Challonge** : nouvelle URL, voir §8.4 (seul le nom d'hôte
+>   change, le chemin, les en-têtes et la réponse sont identiques).
+> - **Plus de mise en pause** : le « free tier » hébergé n'existe plus ici, le
+>   pré-vol §5 en tient compte.
+> - **Sauvegardes automatiques** chaque nuit en plus des exports manuels : §7.
+> - **Les sections ci-dessous qui parlent de « projet Supabase » / `supabase.com`
+>   (surtout §0)** décrivent l'ancien projet hébergé ; l'interface de Studio
+>   est la même, mais le schéma s'applique désormais par migrations
+>   (`supabase/migrations/`), jamais en collant `schema.sql`.
+
+---
+
 ## §0 — Premier démarrage : appliquer `schema.sql` (bootstrap, une seule fois)
+
+> **Historique.** Cette procédure est celle du projet hébergé (supabase.com).
+> Sur le stack auto-hébergé, le schéma et les données sont déjà en place ;
+> pour reconstruire de zéro, voir `knowledge/DEPLOYMENT.md` §13.
 
 Cette étape est le préalable à tous les workflows suivants. À faire **une fois
 par environnement** (dev, puis à nouveau si un nouveau projet Supabase est créé
@@ -244,19 +268,18 @@ côté Studio (F5, `schema.sql` §1 — `ingame_name`, `team_text`,
 ouvrir l'événement (ne pas annoncer `/ots` disponible aux joueurs) tant que
 les trois items ne sont pas cochés.
 
-1. **Le projet Supabase est actif (non mis en pause).**
-   - Ouvrir **Supabase Studio** sur le projet de production.
-   - Le **free tier met en pause un projet après ~7 jours d'inactivité API**
-     (aucune requête PostgREST reçue). Si le projet est pausé, Studio affiche
-     un bandeau/écran d'état indiquant le projet en pause plutôt que le
-     tableau de bord habituel.
-   - **Scénario projet pausé (à traiter, pas à improviser) :** cliquer sur
-     **Resume** (ou **Restore**, selon la version de Studio) et attendre que
-     le projet redémarre complètement (le tableau de bord redevient
-     accessible, les tables réapparaissent dans Table Editor) avant de passer
-     à l'item suivant. Prévoir quelques minutes de marge avant l'heure de
-     l'événement pour ce cas précisément — ne pas faire ce pré-vol à la
-     dernière minute.
+1. **Le stack Supabase est actif et sain.**
+   - Il n'y a **plus de pause d'inactivité** (c'était une limite du free tier
+     hébergé, supprimée par RFC-015). Le risque équivalent est désormais une
+     panne du VPS ou d'un conteneur.
+   - Ouvrir **Studio** (`https://161-97-171-179.sslip.io`) : si le tableau de
+     bord s'affiche et que les tables apparaissent dans Table Editor, la base
+     répond.
+   - Si Studio ne répond pas : sur le VPS, `cd /opt/supabase && docker compose
+     ps` — les sept services doivent être `healthy` ; au besoin
+     `docker compose up -d`. Voir `knowledge/DEPLOYMENT.md` §13.
+   - Vérifier aussi que **le dernier backup nocturne est récent** :
+     `ls -lt /var/backups/supabase | head -3`.
 2. **Exactement un tournoi, le bon, a `is_active = true`.**
    - **Table Editor → tournaments** : vérifier qu'une seule ligne a
      `is_active = true`, et que c'est bien celle de l'événement du jour (pas
@@ -398,6 +421,15 @@ repose sur deux sources, en pratique complémentaires :
    correction faite après la saisie initiale (Journey B, §3 « Modifier un
    joueur »).
 
+3. **La sauvegarde automatique nocturne (RFC-015).** Un `pg_dump` de toute la
+   base est écrit chaque nuit à 03:15 UTC dans `/var/backups/supabase/` (14
+   jours conservés), puis capturé par les sauvegardes automatiques du
+   fournisseur du VPS. Elle couvre l'état complet (roster, profils, résultats
+   figés), pas seulement `players`. Elle **complète** les deux sources
+   ci-dessus sans les remplacer : le break-glass (§6b) s'appuie sur l'export
+   CSV / les notes, pas sur le dump. Procédure de restauration :
+   `knowledge/DEPLOYMENT.md` §13.
+
 **Quand rafraîchir cette sauvegarde :**
 - **Une première fois** juste après avoir finalisé le roster (fin de la
   saisie rapide, §4).
@@ -470,11 +502,17 @@ de cache sont vides et tout `/ots` échouera en `requester_not_found`.
 
 ### 4. La commande de déclenchement
 
+> **URL changée le 2026-10-19 (RFC-015).** L'ancienne forme
+> `https://<project-ref>.supabase.co/functions/v1/challonge-sync` pointe vers le
+> projet hébergé, désormais abandonné. Seule l'URL change : le secret, les
+> en-têtes et le corps sont identiques. Aucun en-tête `Authorization` n'est
+> nécessaire.
+
 Le secret est **toujours** remplacé par un placeholder dans ce document —
 **jamais** une valeur réelle committée (RULES §16) :
 
 ```bash
-curl -X POST "https://<project-ref>.supabase.co/functions/v1/challonge-sync" \
+curl -X POST "https://161-97-171-179.sslip.io/functions/v1/challonge-sync" \
   -H "Content-Type: application/json" \
   -H "x-challonge-sync-secret: <CHALLONGE_SYNC_SECRET — depuis vos notes, jamais dans ce fichier>" \
   -d '{"tournament_id": <id Supabase du tournoi>}'

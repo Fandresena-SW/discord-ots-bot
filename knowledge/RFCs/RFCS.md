@@ -298,12 +298,13 @@ hosted Supabase project to a self-hosted stack on the production VPS. No
 
 | # | RFC | Complexity | Status |
 |---|-----|-----------|--------|
-| **015** | [Self-Hosted Supabase on the Production VPS](RFC-015-Self-Hosted-Supabase.md) | Medium–High | 📝 Draft — proposed 2026-10-19 |
+| **015** | [Self-Hosted Supabase on the Production VPS](RFC-015-Self-Hosted-Supabase.md) | Medium–High | 🚧 Cut over 2026-10-19; soak until 2026-10-26 — `/link-organizer` in-guild, reboot test and provider-snapshot check still open |
 
 Open questions resolved 2026-10-19: backups rely on the VPS provider's
 auto-backups plus a nightly `pg_dump`; a new `deploy/` folder is approved; the
 hosted project soaks for 7 days after cutover. VPS capacity is confirmed
-sufficient (7.8 GiB RAM, 4 vCPU, 94 GB free). Implementation not started.
+sufficient (7.8 GiB RAM, 4 vCPU, 94 GB free). **Implemented and cut over
+2026-10-19**; see the RFC's Completion record for the open acceptance items.
 
 ---
 

@@ -322,6 +322,163 @@ release; the first real incident goes here.
 
 ---
 
+## 13. Self-hosted Supabase stack (RFC-015)
+
+The database runs on **this same VPS** as a Docker Compose stack under
+`/opt/supabase`, replacing the hosted Supabase project. Everything this
+project adds on top of upstream lives in the repo under `deploy/supabase/`;
+upstream's compose is **not** vendored — it is fetched by upstream's own
+`setup.sh` and pinned by `/opt/supabase/.supabase-version`
+(`self-hosted/v0.8.3` at install).
+
+### Layout and what runs
+
+| Piece | Where |
+|---|---|
+| Project dir (compose, `.env`, volumes) | `/opt/supabase` |
+| Our overlay, Caddyfile, scripts | `/opt/supabase/ots/` (copied from `deploy/supabase/`) |
+| Nightly backups | `/var/backups/supabase/` |
+| Function sources | `/opt/supabase/volumes/functions/challonge-sync/` |
+
+Seven containers: `db` (Postgres 17), `rest` (PostgREST), `meta`, `studio`,
+`api-gw` (**Envoy**, upstream's default gateway — not Kong), `functions`
+(edge runtime) and `caddy`. Auth, Realtime, Storage, imgproxy and the pooler
+are disabled in `docker-compose.ots.yml` (they sit under an unused
+`profiles` entry). `COMPOSE_FILE` in `/opt/supabase/.env` layers
+`docker-compose.yml : docker-compose.caddy.yml : ots/docker-compose.ots.yml`.
+
+### Exposure (what is and is not public)
+
+- Public: **22, 80, 443** only. Caddy serves `https://161-97-171-179.sslip.io`
+  (wildcard DNS to the VPS IP, real Let's Encrypt certificate).
+- The gateway is published on **`127.0.0.1:8000` only**; that is the bot's
+  `SUPABASE_URL`. **Docker bypasses `ufw`** — a port published as
+  `"5432:5432"` would be open to the internet whatever `ufw` says, so every
+  published port must carry `127.0.0.1:`.
+- Caddy (`deploy/supabase/caddy/Caddyfile`) is an **allow-list**:
+  `POST /functions/v1/challonge-sync` is proxied (the function authenticates
+  itself with `x-challonge-sync-secret`); `/rest`, `/auth`, `/storage`,
+  `/realtime`, every other `/functions/v1/*` path and `/mcp` return 404;
+  everything else is Studio behind basic auth. Upstream's own Caddyfile
+  proxies `/rest/v1` publicly — do not swap it back in.
+- Verify exposure from the **server** (`ss -ltnH`, `iptables -t nat -S DOCKER`),
+  not from a laptop on a VPN: a VPN can make every port look open.
+
+### Secrets
+
+All in `/opt/supabase/.env` (`chmod 600`, root only, never committed). Names
+that matter:
+
+- `SERVICE_ROLE_KEY` — the **legacy HS256** key. The bot's
+  `SUPABASE_SERVICE_KEY` is this value. (Upstream now also issues an opaque
+  `sb_secret_…` key; the bot and the function send their key as both `apikey`
+  and `Bearer`, which the legacy JWT satisfies with no code change.)
+- `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD` — Studio and Caddy basic auth.
+- `CHALLONGE_API_KEY`, `CHALLONGE_SYNC_SECRET` — passed to the `functions`
+  container by the overlay. There is no `supabase secrets set` on self-hosted.
+  After editing: `cd /opt/supabase && docker compose up -d functions`.
+- **Generating keys prints them.** `setup.sh` and `utils/*.sh` write secrets
+  to stdout; redirect or filter that output, and never run them in a session
+  whose output is logged.
+
+### Edge Function deploy
+
+`deploy/supabase/sync-functions.sh [root@<vps>]` copies the function's `.ts`
+files (tests excluded) into the functions volume. No restart: edge-runtime
+starts a worker per request. The upstream `main` router verifies JWTs only when
+`FUNCTIONS_VERIFY_JWT=true`; it is `false` here (the upstream default, and
+required — the organizer's `curl` sends no `Authorization` header).
+
+The trigger URL is `https://161-97-171-179.sslip.io/functions/v1/challonge-sync`;
+path, headers, body and response are unchanged from §12.
+
+### Database privileges
+
+The self-hosted Postgres image's default ACL grants `anon`/`authenticated`
+full privileges on new `public` tables (RLS, enabled with zero policies, is
+all that kept them at `200 []`). Migration
+`20261019000000_revoke_anon_authenticated_public` revokes that, for existing
+tables and future ones. After it, `anon` gets `42501 permission denied`.
+
+### Backups and restore
+
+`deploy/supabase/backup.sh` (systemd timer `ots-backup.timer`, 03:15 UTC,
+persistent) writes a custom-format `pg_dump` of `public` + `supabase_migrations`
+to `/var/backups/supabase/ots-<UTC-timestamp>.dump`, checks the archive with
+`pg_restore --list`, and deletes dumps older than 14 days. The VPS provider's
+auto-backups capture that directory; a snapshot of a running Postgres is only
+crash-consistent, so the dump is the artifact guaranteed to restore.
+
+Restore into a **fresh** database (the flags matter — without `--clean
+--if-exists` the archive's `CREATE SCHEMA public` fails):
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "create database restore_test"
+docker exec -i supabase-db pg_restore -U supabase_admin -d restore_test \
+  --clean --if-exists --no-owner --exit-on-error < /var/backups/supabase/ots-<ts>.dump
+```
+
+A restore drill (backup, restore to a scratch DB, compare per-table content
+checksums, drop the scratch DB) passed on 2026-10-19.
+
+### Data migration procedure (hosted → self-hosted)
+
+Used for the RFC-015 cutover; reusable for any reload. Postgres is 17 on both
+sides, and `supabase_admin` (superuser) is needed for the restore.
+
+1. Stop the bot (no writes in flight).
+2. `pg_dump "<hosted session-pooler URL>" -a -n public -Fc --no-owner` run
+   through `docker exec supabase-db` (the container has the v17 client). Use
+   the **session pooler** string — the direct host is IPv6-only.
+3. Truncate every `public` table (`restart identity cascade`) as
+   `supabase_admin`, then `pg_restore -a --disable-triggers --no-owner
+   --exit-on-error`. **Triggers must be disabled**: `players_autolink_profile`
+   would otherwise rewrite imported rows. Truncation is required because the
+   tier reference rows already exist from the migration.
+4. Compare per-table `md5` of sorted `to_jsonb(row)` on both sides; use
+   `to_jsonb`, not `row::text`, because column *position* differs for
+   `challonge_participants_cache.challonge_group_player_id` (added by `ALTER`
+   on hosted, inline in the baseline migration) — harmless, restore is by name.
+5. Point the bot at `http://127.0.0.1:8000` with the self-hosted
+   `SERVICE_ROLE_KEY`; restart it.
+
+**Rollback:** restore the previous `.env` values (`SUPABASE_URL`,
+`SUPABASE_SERVICE_KEY`) and restart. Clean only while no writes have happened
+on the self-hosted side: `/link-organizer`, `/unlink` and synced cache rows
+made afterwards do not exist on hosted.
+
+### Operations
+
+```bash
+cd /opt/supabase
+docker compose ps                       # all seven should be healthy
+sh run.sh logs <service>                # follow one service
+systemctl list-timers ots-backup.timer  # next backup
+```
+
+Upgrade: back up first, then `sh update.sh --dry-run`, `sh update.sh`,
+`sh run.sh pull && sh run.sh recreate`. Re-check `docker compose config`
+published ports afterwards — an upstream change must not re-publish a port
+without `127.0.0.1:`.
+
+### Troubleshooting log (self-hosted)
+
+- **`challonge_*_cache.fetched_at` never advances on re-sync** — pre-existing
+  (also true on hosted): the function's `merge-duplicates` upsert never sets
+  the column, so it keeps its insert-time default. The F36 staleness warning
+  therefore cannot reflect a refresh. Not caused by the migration; fix is to
+  include `fetched_at` in the upsert payload.
+- **`pg_restore: schema "public" already exists`** — missing `--clean
+  --if-exists` (see Backups and restore).
+- **A script piped to `ssh host bash -s` stops partway** — a command inside it
+  that reads stdin (`docker exec -i`, `ssh`) swallows the rest of the script.
+  Redirect its input explicitly (`< file`) or drop `-i`.
+- **`read -p` under zsh** — zsh uses `read "VAR?prompt"`; and the `!` prefix
+  in Claude Code has no terminal, so interactive prompts return empty. Run
+  prompting commands in a real terminal.
+
+---
+
 ## References
 
 - `CLAUDE.md` — "Run locally" section, config/env var reference.
