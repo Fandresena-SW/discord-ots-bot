@@ -407,7 +407,10 @@ that matter:
   and `Bearer`, which the legacy JWT satisfies with no code change.)
 - `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD` — Studio and Caddy basic auth. The
   edge reads its own copy as `OTS_PROXY_AUTH_USERNAME` / `OTS_PROXY_AUTH_PASSWORD`
-  in `/opt/edge/.env`; **change both together**.
+  in `/opt/edge/.env`; **change both together**. The edge's password is the
+  **bcrypt hash** of `DASHBOARD_PASSWORD` (single-quoted, it contains `$`), not
+  the plaintext: `docker run --rm caddy:2 caddy hash-password --plaintext '<pw>'`.
+  Then `cd /opt/edge && docker compose up -d --force-recreate caddy`.
 - `STUDIO_DEFAULT_PROJECT` — the project name Studio displays (`discord-ots-bot`).
   Self-hosted Studio has no UI to rename it; edit this and run
   `docker compose up -d studio`.

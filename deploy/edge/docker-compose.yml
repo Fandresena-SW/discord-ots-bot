@@ -26,14 +26,12 @@ services:
     networks:
       - edge
     # Site files read their own variables (see env.edge.example). Basic-auth
-    # passwords are hashed at startup so .env holds plaintext only on the host.
+    # passwords are stored in .env ALREADY bcrypt-hashed. Do not hash them in
+    # `command:` at startup: the hash would exist only in that shell's env, so
+    # a `docker exec ... caddy reload` (which reads the container's env_file
+    # values) would substitute the plaintext and break every login with
+    # "hashedSecret too short to be a bcrypted password".
     env_file: .env
-    command:
-      - /bin/sh
-      - -c
-      - |
-        OTS_PROXY_AUTH_PASSWORD=$$(caddy hash-password --plaintext "$$OTS_PROXY_AUTH_PASSWORD") && \
-        caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./sites:/etc/caddy/sites:ro

@@ -113,6 +113,14 @@ edge); non-loopback listeners still only 22/80/443; `db` is on `supabase_default
   mechanism RFC-015's reboot test exercised for the previous topology; it was not
   re-verified for this one.
 
+**Incident 2026-10-20 — Studio login 401 after the atelier site was added.** The
+compose `command:` hashed `OTS_PROXY_AUTH_PASSWORD` into the shell that launched Caddy
+only; the `caddy reload` that added `atelier.caddy` ran via `docker exec` and read the
+plaintext from `env_file`, so Caddy logged `hashedSecret too short to be a bcrypted
+password` on every attempt. Fixed by recreating the container, then permanently by
+storing the **bcrypt hash** in `/opt/edge/.env` and dropping the startup hashing from
+`docker-compose.yml` (see `DEPLOYMENT.md` §13).
+
 **Still open:**
 - Nothing else has joined `edge` yet; the multi-tenant behavior (two stacks on `edge`,
   no alias confusion) is reasoned from Docker's documented behavior, **not yet
