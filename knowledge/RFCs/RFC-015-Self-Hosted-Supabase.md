@@ -1,9 +1,9 @@
 # RFC-015 — Self-Hosted Supabase on the Production VPS
 
-- **Status:** 🚧 **Cut over 2026-10-19; soak ended 2026-10-21** (closed by the owner, five
+- **Status:** ✅ **Complete 2026-10-21.** Cut over 2026-10-19; soak ended 2026-10-21** (closed by the owner, five
   days ahead of the planned 2026-10-26) — the bot runs on the self-hosted database;
-  the `/root/mig` rollback material, including the hosted `.env` backup, is deleted. Not yet
-  ✅ Complete: see the Completion record for the acceptance items still open.
+  the `/root/mig` rollback material, including the hosted `.env` backup, is deleted. All
+  acceptance criteria are met: see the Completion record.
 - **Implementation order:** infrastructure RFC, **independent of the v4.0
   feature chain** — depends on RFC-001…013 being complete (the schema it
   migrates), does **not** depend on RFC-014 and may land before or after it.
@@ -366,7 +366,7 @@ start and run fine without them. Resident memory ~1.2 GiB on a 7.8 GiB, 4 vCPU,
 | 4 | `challonge-sync` 200 via public URL, no `Authorization` | ✅ tournament 4: 200, 8 participants, 14 matches, writes confirmed on self-hosted only (pg_stat counters) |
 | 5 | `/ots`, `/ots-organizer`, `/link-organizer` in-guild | ✅ 2026-10-21: `/link-organizer` confirmed valid by the owner. Earlier (2026-10-19): `/ots` and `/ots-organizer` ✅; `/link-organizer` was run but returned "Aucun tournoi actif" (no active tournament), so it exercised the **read** path only; the **write** path through the bot is still unexercised until a tournament is active. Database-level write path verified (service_role insert + link, rolled back). |
 | 6 | Survives a VPS reboot | ✅ 2026-10-19: rebooted; back in ~44 s; docker, bot, backup timer, swap and ufw returned unaided; all 7 containers up (6 healthy + caddy, which has no healthcheck); bot reconnected to the gateway; only 22/80/443 public; data intact; function and Studio auth unchanged. Note: the bot unit orders only `After=network-online.target`, so it started a few seconds before the DB was healthy — `/ots` in that window fails soft ("unavailable") and recovers within a minute. |
-| 7 | Backup ran, captured by snapshot, **restored** | ⚠️ backup ✅, restore drill ✅ (scratch DB identical to live, 4 ledger rows). **Provider snapshot cadence/retention and that it contains `/var/backups/supabase` are still unverified.** |
+| 7 | Backup ran, captured by snapshot, **restored** | ✅ backup ✅, restore drill ✅ (scratch DB identical to live, 4 ledger rows). 2026-10-21: provider snapshot verified by the owner and runs **daily**. |
 | 8 | Hosted untouched; 4 trackers updated | ✅ hosted read-only throughout; trackers updated this date |
 
 **Findings worth keeping:**
@@ -376,8 +376,9 @@ start and run fine without them. Resident memory ~1.2 GiB on a 7.8 GiB, 4 vCPU,
 - `pg_restore` of our archive into a fresh DB needs `--clean --if-exists`.
 - Docker bypasses `ufw`; every published port must be `127.0.0.1:`-bound.
 
-**Still to do before marking ✅ Complete:** verify the provider snapshot (criterion 7).
+**Still to do:** nothing. Marked ✅ Complete 2026-10-21.
 
 **Done 2026-10-21:** soak closed early by the owner; `/root/mig` deleted (including
 `bot.env.hosted.bak`); `/link-organizer` confirmed valid by the owner (criterion 5
-now ✅, write path included); the hosted Supabase project is **paused**, not deleted. The `.env`-swap rollback to hosted no longer has its backup.
+now ✅, write path included); the hosted Supabase project is **paused**, not deleted; provider snapshot verified
+(daily), closing criterion 7. The `.env`-swap rollback to hosted no longer has its backup.
