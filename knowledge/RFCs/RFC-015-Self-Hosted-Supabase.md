@@ -1,7 +1,8 @@
 # RFC-015 — Self-Hosted Supabase on the Production VPS
 
-- **Status:** 🚧 **Cut over 2026-10-19; in soak until 2026-10-26** — the bot runs
-  on the self-hosted database; hosted is untouched as the fallback. Not yet
+- **Status:** 🚧 **Cut over 2026-10-19; soak ended 2026-10-21** (closed by the owner, five
+  days ahead of the planned 2026-10-26) — the bot runs on the self-hosted database;
+  the `/root/mig` rollback material, including the hosted `.env` backup, is deleted. Not yet
   ✅ Complete: see the Completion record for the acceptance items still open.
 - **Implementation order:** infrastructure RFC, **independent of the v4.0
   feature chain** — depends on RFC-001…013 being complete (the schema it
@@ -377,6 +378,7 @@ start and run fine without them. Resident memory ~1.2 GiB on a 7.8 GiB, 4 vCPU,
 
 **Still to do before marking ✅ Complete:** exercise `/link-organizer` end to end
 once a tournament is active (or accept the database-level check); verify the
-provider snapshot; end of soak (2026-10-26) and the
-decommission decision for hosted; delete `/root/mig` (holds data dumps and the
-hosted `.env` backup).
+provider snapshot; the decommission decision for hosted.
+
+**Done 2026-10-21:** soak closed early by the owner; `/root/mig` deleted (including
+`bot.env.hosted.bak`). The `.env`-swap rollback to hosted no longer has its backup.
