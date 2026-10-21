@@ -1,6 +1,6 @@
 # RFC-015 — Self-Hosted Supabase on the Production VPS
 
-- **Status:** ✅ **Complete 2026-10-21.** Cut over 2026-10-19; soak ended 2026-10-21** (closed by the owner, five
+- **Status:** ✅ **Complete 2026-10-21.** Cut over 2026-10-19; soak ended 2026-10-21 (closed by the owner, five
   days ahead of the planned 2026-10-26) — the bot runs on the self-hosted database;
   the `/root/mig` rollback material, including the hosted `.env` backup, is deleted. All
   acceptance criteria are met: see the Completion record.
