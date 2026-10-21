@@ -379,6 +379,32 @@ joining `edge` with its **gateway and Studio only** — `db`, `rest`, `meta` and
   A broken site file breaks the **whole** edge on reload, so validate first.
 - Adding a project: see the handover at `~/.claude/handovers/supabase-second-project-handover.md`.
 
+### Other projects on this VPS: atelier
+
+The VPS is no longer OTS-only. A second project, **atelier**, runs here as its own
+Docker Compose stack and publishes itself through the shared edge. It is a separate
+project: its stack, data and backups are not managed from this repo.
+
+| Piece | Where |
+|---|---|
+| Stack dir | `/opt/atelier` (containers `atelier-*`) |
+| Edge site file | `/opt/edge/sites/atelier.caddy` |
+| Public host | `https://atelier.161-97-171-179.sslip.io` |
+| Gateway | loopback **`127.0.0.1:8001`** (OTS's is `:8000`) |
+| Backup | `/usr/local/sbin/atelier-backup.sh`, cron daily **02:17 UTC** |
+
+- **Port map:** `8000` = OTS gateway, `8001` = atelier gateway, both loopback only.
+  A new stack must pick a free loopback port and keep the `127.0.0.1:` prefix.
+- **Backup timing:** atelier at 02:17 UTC (cron), OTS at 03:15 UTC
+  (`ots-backup.timer`) — they do not overlap.
+- **Blast radius:** the two stacks are independent, but a **server reboot takes both
+  down**. Any reboot test (RFC-015/016 waived one) must be coordinated: the bot
+  (`systemd`) and both compose stacks must come back, and `edge-caddy` must be up
+  before either public URL answers. Do not reboot the VPS without checking atelier
+  is not mid-operation.
+- A broken `atelier.caddy` breaks the **whole** edge on reload (see above) —
+  validate before applying, for OTS and atelier alike.
+
 ### Exposure (what is and is not public)
 
 - Public: **22, 80, 443** only. The shared Caddy serves `https://161-97-171-179.sslip.io`
