@@ -122,6 +122,8 @@ storing the **bcrypt hash** in `/opt/edge/.env` and dropping the startup hashing
 `docker-compose.yml` (see `DEPLOYMENT.md` §13).
 
 **Still open:**
-- Nothing else has joined `edge` yet; the multi-tenant behavior (two stacks on `edge`,
-  no alias confusion) is reasoned from Docker's documented behavior, **not yet
-  exercised**. The first project to join should record its result here.
+- **Atelier has joined `edge`** (`/opt/edge/sites/atelier.caddy`, host
+  `atelier.161-97-171-179.sslip.io`, gateway `127.0.0.1:8001`; migrated 2026-10-21, see
+  `DEPLOYMENT.md` §13). The 2026-10-20 incident above came from adding its site file.
+  A systematic check of alias isolation between the two stacks is still not recorded here.
+- A server reboot now affects both projects and must be coordinated with atelier.

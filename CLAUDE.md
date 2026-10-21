@@ -110,7 +110,7 @@ system Python — use the venv where `requirements.txt` is installed.
 
 `Procfile` declares the process type (`worker: python3 bot.py`) for a
 Heroku/Railway/Render-style PaaS, but **production actually runs on a
-self-managed VPS (moved from Oracle Cloud on 2026-10-19) as a systemd service** — see
+self-managed VPS (moved from Oracle Cloud on 2026-10-19; shared with the separate `atelier` project since 2026-10-21 — reboots/edge changes affect both) as a systemd service** — see
 `knowledge/DEPLOYMENT.md` for the full setup, redeploy, and troubleshooting
 steps.
 

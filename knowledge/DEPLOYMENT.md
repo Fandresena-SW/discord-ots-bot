@@ -1,5 +1,9 @@
 # DEPLOYMENT — Running the bot on a VPS (Contabo-style root VPS, systemd)
 
+> The VPS is **shared**: besides OTS it hosts the `atelier` project (§13, "Other
+> projects on this VPS"). Server-wide actions (reboot, firewall, edge changes)
+> affect both.
+
 - **Status:** Production moved to a new VPS on 2026-10-19 (previously Oracle
   Cloud, now retired). §12 (Challonge sync Edge Function deploy) added by
   RFC-010 and is unaffected by the move.
@@ -324,7 +328,7 @@ release; the first real incident goes here.
 
 ## 13. Self-hosted Supabase stack (RFC-015)
 
-The database runs on **this same VPS** as a Docker Compose stack under
+The database runs on **this same VPS** (shared with the atelier project, see below) as a Docker Compose stack under
 `/opt/supabase`, replacing the hosted Supabase project. Everything this
 project adds on top of upstream lives in the repo under `deploy/supabase/`;
 upstream's compose is **not** vendored — it is fetched by upstream's own

@@ -299,7 +299,7 @@ hosted Supabase project to a self-hosted stack on the production VPS. No
 | # | RFC | Complexity | Status |
 |---|-----|-----------|--------|
 | **015** | [Self-Hosted Supabase on the Production VPS](RFC-015-Self-Hosted-Supabase.md) | Medium–High | 🚧 Cut over 2026-10-19; soak until 2026-10-26 — reboot test ✅; `/link-organizer` write path (needs an active tournament) and provider-snapshot check still open |
-| **016** | [Shared Public Edge for Multiple Self-Hosted Supabase Stacks](RFC-016-Shared-Edge-For-Multiple-Supabase-Stacks.md) | Medium | ✅ Implemented 2026-10-19 (~4 s public gap, cert preserved, old Caddy removed); reboot test waived; first second-project join not yet exercised |
+| **016** | [Shared Public Edge for Multiple Self-Hosted Supabase Stacks](RFC-016-Shared-Edge-For-Multiple-Supabase-Stacks.md) | Medium | ✅ Implemented 2026-10-19 (~4 s public gap, cert preserved, old Caddy removed); reboot test waived (now a shared-VPS coordination item); atelier joined the edge 2026-10-21 |
 
 Open questions resolved 2026-10-19: backups rely on the VPS provider's
 auto-backups plus a nightly `pg_dump`; a new `deploy/` folder is approved; the
